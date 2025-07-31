@@ -1,12 +1,13 @@
+const path = require('path');
 const sqlite3 = require('sqlite3').verbose();
-const rutaBD = './agenda.db';
 
-const baseDatos = new sqlite3.Database(rutaBD, (error) => {
-    if (error) {
-        console.error('❌ Error al conectar a la base de datos:', error.message);
-    } else {
-        console.log('✅ Conexión exitosa a agenda.db');
-    }
+const dbPath = path.resolve(__dirname, 'agenda.db'); // debe apuntar al archivo correcto
+const db = new sqlite3.Database(dbPath, (err) => {
+  if (err) {
+    console.error('❌ Error al conectar:', err.message);
+  } else {
+    console.log('✅ Conectado a la base de datos');
+  }
 });
 
-module.exports = baseDatos;
+module.exports = db;
