@@ -1,8 +1,11 @@
-
 import React, { useState } from 'react';
-import Contactos from './componentes/Contactos';
+import Contactos from './components/Contactos';
+import Citas from './components/Citas';
+import Notas from './components/Notas';
+import Tareas from './components/Tareas';
 
-function App() {
+const App = () => {
+  const [seccion, setSeccion] = useState('contactos');
   const [modoOscuro, setModoOscuro] = useState(false);
 
   const toggleModo = () => {
@@ -10,22 +13,31 @@ function App() {
     setModoOscuro(!modoOscuro);
   };
 
+  const renderSeccion = () => {
+    switch (seccion) {
+      case 'citas': return <Citas />;
+      case 'notas': return <Notas />;
+      case 'tareas': return <Tareas />;
+      default: return <Contactos />;
+    }
+  };
+
   return (
-    <div className="min-h-screen p-4 transition-colors duration-300">
-      <header className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold">📅 Agenda Electrónica</h1>
-        <button
-          onClick={toggleModo}
-          className="px-4 py-2 rounded bg-gray-800 text-white dark:bg-gray-200 dark:text-black"
-        >
-          {modoOscuro ? 'Modo Claro' : 'Modo Oscuro'}
+    <div className="min-h-screen bg-white text-black dark:bg-gray-900 dark:text-white transition-colors">
+      <nav className="flex justify-between p-4 shadow-md dark:shadow-gray-700">
+        <div className="flex gap-4">
+          <button onClick={() => setSeccion('contactos')}>📇 Contactos</button>
+          <button onClick={() => setSeccion('citas')}>📆 Citas</button>
+          <button onClick={() => setSeccion('notas')}>📝 Notas</button>
+          <button onClick={() => setSeccion('tareas')}>✅ Tareas</button>
+        </div>
+        <button onClick={toggleModo}>
+          {modoOscuro ? '☀️ Claro' : '🌙 Oscuro'}
         </button>
-      </header>
-      <main>
-        <Contactos />
-      </main>
+      </nav>
+      <main className="p-6">{renderSeccion()}</main>
     </div>
   );
-}
+};
 
 export default App;

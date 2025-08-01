@@ -1,20 +1,27 @@
 const express = require('express');
 const app = express();
-const bodyParser = require('body-parser');
 const cors = require('cors');
-require('dotenv').config();
+const uploadRouter = require('./routes/upload');
 
-// Middlewares
 app.use(cors());
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+app.use(express.json());
 
 // Rutas
-const rutaContactos = require('./routes/contactos');
-app.use('/api/contactos', rutaContactos);
+app.use('/api/contactos', require('./routes/contactos'));
+app.use('/api/citas', require('./routes/citas'));
+app.use('/api/notas', require('./routes/notas'));
+app.use('/api/tareas', require('./routes/tareas'));
+app.use('/api/grupos', require('./routes/grupos'));
+app.use('/api/upload', uploadRouter);
 
-// Puerto
-const puerto = process.env.PUERTO || 3000;
+// Carpeta pública
+app.use('/uploads', express.static('uploads'));
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🚀 Servidor backend corriendo en http://localhost:${PORT}`);
+});
+
 
 // Test simple
 const bd = require('./db/conexion');
@@ -25,6 +32,4 @@ bd.get("SELECT name FROM sqlite_master WHERE type='table'", (error, fila) => {
         console.log("📂 Conexión confirmada. Base de datos contiene tablas.");
     }
 });
-app.listen(puerto, () => {
-    console.log(`🚀 Servidor escuchando en http://localhost:${puerto}`);
-});
+
