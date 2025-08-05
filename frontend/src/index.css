@@ -3,3 +3,13 @@
 @tailwind components;
 @tailwind utilities;
 @tailwind screens;
+@layer base {
+  body {
+    font-family: 'Segoe UI Emoji', 'Noto Color Emoji', system-ui, sans-serif;
+  }
+}
+@layer components {
+  .btn {
+    @apply px-4 py-2 rounded bg-blue-500 text-white hover:bg-blue-600;
+  }
+}
