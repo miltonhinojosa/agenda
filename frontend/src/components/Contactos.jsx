@@ -137,45 +137,48 @@ const Contactos = () => {
   };
 
   return (
-    <div className="px-4 py-6">
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-2xl font-bold">📇 Contactos</h2>
-        {/* Barra de búsqueda*/}
-        <div className="mb-4">
+    <div className="px-2 py-2">
+      {/* Encabezado barra de titulos, buscador y botón nueva cita  */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+        <h2 className="text-2xl font-bold text-gray-800 dark:text-white">📇 Contactos</h2>
+
+        <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
           <input
             type="text"
-            placeholder="🔍 Buscar por nombre..."
+            placeholder="🔍 Buscar (nombre, celular, empresa, grupo)"
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
-            className="w-full md:w-1/2 px-3 py-1 border rounded dark:bg-gray-800 dark:text-white border-gray-300 dark:border-gray-700"
+            className="w-full sm:w-80 px-3 py-2 border rounded dark:bg-gray-800 dark:text-white border-gray-300 dark:border-gray-700"
           />
+          
+          {/* Botón para abrir modal de nuevo contacto */}
+          <button
+            onClick={() => {
+              setMostrarModal(true);
+              setModoEdicion(false);
+              setContactoEditandoId(null);
+              setNuevoContacto({
+                nombre: '',
+                telefono_fijo: '',
+                celular: '',
+                direccion: '',
+                email: '',
+                facebook: '',
+                fecha_nacimiento: '',
+                empresa: '',
+                grupo_id: '',
+                foto_url: '',
+                archivoFoto: null,
+                codigo_pais: '+591'
+              });
+            }}
+            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+          >
+            ➕ Nuevo contacto
+          </button>
         </div>
-        {/* Botón para abrir modal de nuevo contacto */}
-        <button
-          onClick={() => {
-            setMostrarModal(true);
-            setModoEdicion(false);
-            setContactoEditandoId(null);
-            setNuevoContacto({
-              nombre: '',
-              telefono_fijo: '',
-              celular: '',
-              direccion: '',
-              email: '',
-              facebook: '',
-              fecha_nacimiento: '',
-              empresa: '',
-              grupo_id: '',
-              foto_url: '',
-              archivoFoto: null,
-              codigo_pais: '+591'
-            });
-          }}
-          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-        >
-          ➕ Nuevo contacto
-        </button>
       </div>
+
       {/* Tarjetas */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
         {contactos
@@ -191,7 +194,7 @@ const Contactos = () => {
           .map((c) => (
             <div
               key={c.id}
-              className="flex p-3 bg-white dark:bg-gray-800 rounded-lg shadow-md items-start gap-3"
+              className="flex p-3 bg-gray-200 dark:bg-gray-800 rounded-lg shadow-md items-start gap-3"
             >
               {/* Foto + Ver */}
               <div className="flex flex-col items-center shrink-0">
@@ -268,39 +271,82 @@ const Contactos = () => {
       {/* 🔍 Modal de vista de contacto */}
       {mostrarDetalle && contactoDetalle && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-900 text-gray-900 dark:text-white rounded p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            <h3 className="text-xl font-bold mb-4">👁️ Detalle del contacto</h3>
+          <div className="bg-white dark:bg-gray-900 text-gray-900 dark:text-white rounded p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+            <h3 className="text-xl font-bold mb-4 text-center">👁️ Detalle del contacto</h3>
+
             <div className="flex flex-col items-center mb-4">
               {contactoDetalle.foto_url ? (
                 <img
                   src={`http://localhost:3000${contactoDetalle.foto_url}`}
                   alt="Foto grande"
-                  className="w-48 h-48 rounded-full object-cover mb-2"
+                  className="w-40 h-40 rounded-full object-cover shadow-lg border-4 border-white dark:border-gray-700"
                 />
               ) : (
-                <div className="w-48 h-48 rounded-full bg-gray-400 flex items-center justify-center text-4xl text-white mb-2">👤</div>
+                <div className="w-40 h-40 rounded-full bg-gray-400 flex items-center justify-center text-5xl text-white mb-2">
+                  👤
+                </div>
               )}
-              <h4 className="text-lg font-bold">{contactoDetalle.nombre}</h4>
-              <p className="text-sm text-gray-600 dark:text-gray-300 italic">{obtenerNombreGrupo(contactoDetalle.grupo_id)}</p>
+              <h4 className="text-2xl font-bold mt-2">{contactoDetalle.nombre}</h4>
+              <p className="text-sm text-gray-600 dark:text-gray-400 italic">
+                {obtenerNombreGrupo(contactoDetalle.grupo_id)}
+              </p>
             </div>
-            <div className="grid grid-cols-1 gap-2 text-sm">
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm px-2">
               <p><strong>📱 Celular:</strong> {contactoDetalle.celular}</p>
               <p><strong>☎️ Teléfono fijo:</strong> {contactoDetalle.telefono_fijo || '—'}</p>
-              <p><strong>📧 Email:</strong> {contactoDetalle.email || '—'}</p>
+              <p>
+                <strong>📧 Email:</strong>{' '}
+                {contactoDetalle.email ? (
+                  <a
+                    href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(contactoDetalle.email)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 dark:text-blue-400 underline hover:text-blue-800"
+                  >
+                    {contactoDetalle.email}
+                  </a>
+                ) : '—'}
+              </p>
               <p><strong>🏢 Empresa:</strong> {contactoDetalle.empresa || '—'}</p>
               <p><strong>📍 Dirección:</strong> {contactoDetalle.direccion || '—'}</p>
               <p><strong>🎂 Fecha de nacimiento:</strong> {contactoDetalle.fecha_nacimiento || '—'}</p>
-              <p><strong>🔗 Facebook:</strong> {contactoDetalle.facebook ? <a href={contactoDetalle.facebook} target="_blank" className="text-blue-500 underline">Ver perfil</a> : '—'}</p>
-              <p><strong>💬 WhatsApp:</strong> {contactoDetalle.celular ? <a href={`https://wa.me/591${contactoDetalle.celular}`} target="_blank" className="text-green-500 underline">Abrir chat</a> : '—'}</p>
+              <p>
+                <strong>🔗 Facebook:</strong>{' '}
+                {contactoDetalle.facebook ? (
+                  <a
+                    href={contactoDetalle.facebook}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 dark:text-blue-400 underline hover:text-blue-800"
+                  >
+                    Ver perfil
+                  </a>
+                ) : '—'}
+              </p>
+              <p>
+                <strong>💬 WhatsApp:</strong>{' '}
+                {contactoDetalle.celular ? (
+                  <a
+                    href={`https://wa.me/591${contactoDetalle.celular.replace(/\D/g, '')}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-green-600 dark:text-green-400 underline hover:text-green-800"
+                  >
+                    Abrir chat
+                  </a>
+                ) : '—'}
+              </p>
             </div>
-            <div className="flex justify-end gap-3 mt-4">
+
+            <div className="flex justify-end gap-3 mt-6">
               <button
                 onClick={() => {
                   setMostrarDetalle(false);
                   setNuevoContacto({
                     ...contactoDetalle,
                     archivoFoto: null,
-                    codigo_pais: '+591', // o cargar desde contacto si lo tuvieras
+                    codigo_pais: '+591'
                   });
                   setModoEdicion(true);
                   setContactoEditandoId(contactoDetalle.id);
@@ -326,6 +372,7 @@ const Contactos = () => {
           </div>
         </div>
       )}
+
       {/* ➕ Modal de nuevo contacto */}
       {mostrarModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -492,4 +539,3 @@ const Contactos = () => {
 };
 
 export default Contactos;
-

@@ -23,7 +23,7 @@ const App = () => {
   };
 
   return (
-    <div className="min-h-screen bg-white text-black dark:bg-gray-900 dark:text-white transition-colors">
+    <div className="min-h-screen bg-gray-100 text-black dark:bg-gray-900 dark:text-white transition-colors">
       <nav className="flex justify-between p-4 shadow-md dark:shadow-gray-700">
         <div className="flex gap-4">
           <button onClick={() => setSeccion('contactos')}>📇 Contactos</button>

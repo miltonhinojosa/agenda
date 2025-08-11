@@ -14,7 +14,7 @@ app.use('/api/tareas', require('./routes/tareas'));
 app.use('/api/grupos', require('./routes/grupos'));
 app.use('/api/upload', uploadRouter);
 
-// Carpeta pública
+// Carpeta pública para fotos
 app.use('/uploads', express.static('uploads'));
 
 const PORT = process.env.PORT || 3000;
