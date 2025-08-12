@@ -1,18 +1,19 @@
+// Contactos.jsx — pestañas por grupo (Favoritos por defecto) + buscador + CRUD
 import React, { useEffect, useState } from 'react';
 import { FaWhatsapp, FaFacebookF, FaEye } from 'react-icons/fa';
 
 const Contactos = () => {
   const [contactos, setContactos] = useState([]);
   const [grupos, setGrupos] = useState([]);
+  const [grupoActivo, setGrupoActivo] = useState('todos'); // pestaña activa
+  const [busqueda, setBusqueda] = useState('');
+
   const [mostrarModal, setMostrarModal] = useState(false);
   const [mostrarDetalle, setMostrarDetalle] = useState(false);
   const [contactoDetalle, setContactoDetalle] = useState(null);
-  const [busqueda, setBusqueda] = useState('');
-
 
   const [modoEdicion, setModoEdicion] = useState(false);
   const [contactoEditandoId, setContactoEditandoId] = useState(null);
-
 
   const [nuevoContacto, setNuevoContacto] = useState({
     nombre: '',
@@ -29,6 +30,7 @@ const Contactos = () => {
     codigo_pais: '+591'
   });
 
+  // --- Cargas ---
   const cargarContactos = () => {
     fetch('http://localhost:3000/api/contactos')
       .then(res => res.json())
@@ -39,7 +41,12 @@ const Contactos = () => {
   const cargarGrupos = () => {
     fetch('http://localhost:3000/api/grupos')
       .then(res => res.json())
-      .then(setGrupos)
+      .then((lista) => {
+        setGrupos(lista);
+        // Por defecto: pestaña "Favoritos" si existe; sino, "todos"
+        const fav = lista.find(g => (g.nombre || '').toLowerCase() === 'favoritos');
+        setGrupoActivo(fav ? String(fav.id) : 'todos');
+      })
       .catch(console.error);
   };
 
@@ -48,6 +55,7 @@ const Contactos = () => {
     cargarGrupos();
   }, []);
 
+  // --- Helpers ---
   const handleInputChange = (e) => {
     const { name, value, files } = e.target;
     if (name === 'archivoFoto') {
@@ -57,11 +65,16 @@ const Contactos = () => {
     }
   };
 
+  const obtenerNombreGrupo = (id) => {
+    const grupo = grupos.find((g) => g.id === id);
+    return grupo ? grupo.nombre : '';
+  };
+
+  // --- Guardar (crear/editar) ---
   const guardarContacto = async () => {
     try {
       let urlFoto = nuevoContacto.foto_url;
 
-      // Si se sube una nueva foto
       if (nuevoContacto.archivoFoto) {
         const formData = new FormData();
         formData.append('foto', nuevoContacto.archivoFoto);
@@ -114,20 +127,13 @@ const Contactos = () => {
     }
   };
 
-
-  const obtenerNombreGrupo = (id) => {
-    const grupo = grupos.find((g) => g.id === id);
-    return grupo ? grupo.nombre : '';
-  };
-
+  // --- Eliminar ---
   const eliminarContacto = async (id) => {
-  const confirmar = window.confirm("¿Estás seguro de que deseas eliminar este contacto?");
-  if (!confirmar) return;
+    const confirmar = window.confirm("¿Estás seguro de que deseas eliminar este contacto?");
+    if (!confirmar) return;
 
     try {
-      await fetch(`http://localhost:3000/api/contactos/${id}`, {
-        method: 'DELETE'
-      });
+      await fetch(`http://localhost:3000/api/contactos/${id}`, { method: 'DELETE' });
       setMostrarDetalle(false);
       cargarContactos();
     } catch (error) {
@@ -136,46 +142,83 @@ const Contactos = () => {
     }
   };
 
+  // --- UI ---
   return (
     <div className="px-2 py-2">
-      {/* Encabezado barra de titulos, buscador y botón nueva cita  */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
-        <h2 className="text-2xl font-bold text-gray-800 dark:text-white">📇 Contactos</h2>
+      {/* Encabezado: Título + Tabs (al lado) + Buscador + Nuevo */}
+      <div className="mb-4">
+        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+          {/* Izquierda: Título + Pestañas */}
+          <div className="flex-1 flex flex-wrap items-center gap-4">
+            <h2 className="text-2xl font-bold text-gray-800 dark:text-white">📇 Contactos</h2>
 
-        <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
-          <input
-            type="text"
-            placeholder="🔍 Buscar (nombre, celular, empresa, grupo)"
-            value={busqueda}
-            onChange={(e) => setBusqueda(e.target.value)}
-            className="w-full sm:w-80 px-3 py-2 border rounded dark:bg-gray-800 dark:text-white border-gray-300 dark:border-gray-700"
-          />
-          
-          {/* Botón para abrir modal de nuevo contacto */}
-          <button
-            onClick={() => {
-              setMostrarModal(true);
-              setModoEdicion(false);
-              setContactoEditandoId(null);
-              setNuevoContacto({
-                nombre: '',
-                telefono_fijo: '',
-                celular: '',
-                direccion: '',
-                email: '',
-                facebook: '',
-                fecha_nacimiento: '',
-                empresa: '',
-                grupo_id: '',
-                foto_url: '',
-                archivoFoto: null,
-                codigo_pais: '+591'
-              });
-            }}
-            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-          >
-            ➕ Nuevo contacto
-          </button>
+            {/* Tabs de grupos */}
+            <div className="flex gap-2 flex-wrap">
+              {/* Tab "Todos" */}
+              <button
+                onClick={() => setGrupoActivo('todos')}
+                className={`px-3 py-1 rounded-full text-sm border
+                  ${grupoActivo === 'todos'
+                    ? 'bg-blue-600 text-white border-blue-600'
+                    : 'bg-transparent text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
+              >
+                Todos
+              </button>
+
+              {/* Tabs dinámicas */}
+              {grupos.map(g => {
+                const active = String(g.id) === String(grupoActivo);
+                return (
+                  <button
+                    key={g.id}
+                    onClick={() => setGrupoActivo(String(g.id))}
+                    className={`px-3 py-1 rounded-full text-sm border
+                      ${active
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-transparent text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
+                  >
+                    {g.nombre}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Derecha: Buscador + Botón nuevo */}
+          <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+            <input
+              type="text"
+              placeholder="🔍 Buscar (nombre, celular, empresa, grupo)"
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              className="w-full sm:w-80 px-3 py-2 border rounded dark:bg-gray-800 dark:text-white border-gray-300 dark:border-gray-700"
+            />
+            <button
+              onClick={() => {
+                setMostrarModal(true);
+                setModoEdicion(false);
+                setContactoEditandoId(null);
+                setNuevoContacto({
+                  nombre: '',
+                  telefono_fijo: '',
+                  celular: '',
+                  direccion: '',
+                  email: '',
+                  facebook: '',
+                  fecha_nacimiento: '',
+                  empresa: '',
+                  // por defecto, el grupo de la pestaña activa (si no es "todos")
+                  grupo_id: grupoActivo !== 'todos' ? Number(grupoActivo) : '',
+                  foto_url: '',
+                  archivoFoto: null,
+                  codigo_pais: '+591'
+                });
+              }}
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+            >
+              ➕ Nuevo contacto
+            </button>
+          </div>
         </div>
       </div>
 
@@ -183,13 +226,16 @@ const Contactos = () => {
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
         {contactos
           .filter((c) => {
+            // 1) Filtro por grupo (pestaña)
+            const pasaGrupo = grupoActivo === 'todos' || String(c.grupo_id) === String(grupoActivo);
+            // 2) Filtro por texto
             const texto = busqueda.toLowerCase();
-            return (
-              c.nombre?.toLowerCase().includes(texto) ||
-              c.celular?.toLowerCase().includes(texto) ||
-              c.empresa?.toLowerCase().includes(texto) ||
-              obtenerNombreGrupo(c.grupo_id)?.toLowerCase().includes(texto)
-            );
+            const pasaTexto =
+              (c.nombre || '').toLowerCase().includes(texto) ||
+              (c.celular || '').toLowerCase().includes(texto) ||
+              (c.empresa || '').toLowerCase().includes(texto) ||
+              (obtenerNombreGrupo(c.grupo_id) || '').toLowerCase().includes(texto);
+            return pasaGrupo && pasaTexto;
           })
           .map((c) => (
             <div
@@ -350,6 +396,7 @@ const Contactos = () => {
                   });
                   setModoEdicion(true);
                   setContactoEditandoId(contactoDetalle.id);
+                  setGrupoActivo(contactoDetalle.grupo_id ? String(contactoDetalle.grupo_id) : 'todos'); // opcional
                   setMostrarModal(true);
                 }}
                 className="px-4 py-1 bg-yellow-500 text-white rounded hover:bg-yellow-600 text-sm"
@@ -373,11 +420,11 @@ const Contactos = () => {
         </div>
       )}
 
-      {/* ➕ Modal de nuevo contacto */}
+      {/* ➕ Modal de nuevo/editar contacto */}
       {mostrarModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white dark:bg-gray-900 text-gray-900 dark:text-white rounded p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <h3 className="text-xl font-bold mb-4">➕ Nuevo contacto</h3>
+            <h3 className="text-xl font-bold mb-4">{modoEdicion ? '✏️ Editar contacto' : '➕ Nuevo contacto'}</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* NOMBRE */}
               <div className="md:col-span-2">
@@ -399,7 +446,7 @@ const Contactos = () => {
               </div>
 
               {/* CELULAR + CÓDIGO */}
-              <div className="">
+              <div>
                 <label className="block text-xs font-medium mb-1 text-gray-700 dark:text-gray-300">
                   Celular <span className="text-red-500">*</span>
                 </label>
@@ -491,7 +538,6 @@ const Contactos = () => {
                   ))}
                 </select>
               </div>
-
 
               {/* Foto */}
               <div className="md:col-span-2">
