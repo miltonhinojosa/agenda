@@ -1,11 +1,19 @@
-// Contactos.jsx — pestañas por grupo (Favoritos por defecto) + buscador + CRUD
-import React, { useEffect, useState } from 'react';
+// frontend/src/componentes/Contactos.jsx
+import React, { useEffect, useMemo, useState } from 'react';
 import { FaWhatsapp, FaFacebookF, FaEye } from 'react-icons/fa';
+
+const onlyDigits = (s = '') => String(s).replace(/\D/g, '');
+const buildWa = (codigo = '+591', cel = '') => {
+  const cc = onlyDigits(codigo);
+  const c = onlyDigits(cel);
+  return cc && c ? `https://wa.me/${cc}${c}` : '';
+};
 
 const Contactos = () => {
   const [contactos, setContactos] = useState([]);
   const [grupos, setGrupos] = useState([]);
-  const [grupoActivo, setGrupoActivo] = useState('todos'); // pestaña activa
+  const [idFavoritos, setIdFavoritos] = useState(null);
+  const [grupoActivo, setGrupoActivo] = useState('todos');
   const [busqueda, setBusqueda] = useState('');
 
   const [mostrarModal, setMostrarModal] = useState(false);
@@ -27,10 +35,10 @@ const Contactos = () => {
     grupo_id: '',
     foto_url: '',
     archivoFoto: null,
-    codigo_pais: '+591'
+    codigo_pais: '+591' // importante para construir whatsapp en backend
   });
 
-  // --- Cargas ---
+  // ===== Carga de datos =====
   const cargarContactos = () => {
     fetch('http://localhost:3000/api/contactos')
       .then(res => res.json())
@@ -43,9 +51,9 @@ const Contactos = () => {
       .then(res => res.json())
       .then((lista) => {
         setGrupos(lista);
-        // Por defecto: pestaña "Favoritos" si existe; sino, "todos"
         const fav = lista.find(g => (g.nombre || '').toLowerCase() === 'favoritos');
-        setGrupoActivo(fav ? String(fav.id) : 'todos');
+        setIdFavoritos(fav ? fav.id : null);
+        setGrupoActivo(fav ? String(fav.id) : 'todos'); // default Favoritos si existe
       })
       .catch(console.error);
   };
@@ -55,7 +63,17 @@ const Contactos = () => {
     cargarGrupos();
   }, []);
 
-  // --- Helpers ---
+  // ===== Conteos por pestaña =====
+  const conteos = useMemo(() => {
+    const counts = { todos: contactos.length };
+    for (const g of grupos) counts[g.id] = 0;
+    for (const c of contactos) {
+      if (c.grupo_id != null && counts[c.grupo_id] != null) counts[c.grupo_id] += 1;
+    }
+    return counts;
+  }, [contactos, grupos]);
+
+  // ===== Helpers =====
   const handleInputChange = (e) => {
     const { name, value, files } = e.target;
     if (name === 'archivoFoto') {
@@ -70,11 +88,12 @@ const Contactos = () => {
     return grupo ? grupo.nombre : '';
   };
 
-  // --- Guardar (crear/editar) ---
+  // ===== Guardar (crear/editar) =====
   const guardarContacto = async () => {
     try {
       let urlFoto = nuevoContacto.foto_url;
 
+      // Subir foto si hay archivo
       if (nuevoContacto.archivoFoto) {
         const formData = new FormData();
         formData.append('foto', nuevoContacto.archivoFoto);
@@ -86,10 +105,14 @@ const Contactos = () => {
         urlFoto = data.url;
       }
 
+      // Armar WhatsApp también en el cliente (el backend igual recalcula)
+      const whatsapp = buildWa(nuevoContacto.codigo_pais, nuevoContacto.celular);
+
       const contactoAEnviar = {
         ...nuevoContacto,
         foto_url: urlFoto,
-        archivoFoto: undefined
+        archivoFoto: undefined,
+        whatsapp
       };
 
       const method = modoEdicion ? 'PUT' : 'POST';
@@ -127,7 +150,7 @@ const Contactos = () => {
     }
   };
 
-  // --- Eliminar ---
+  // ===== Eliminar =====
   const eliminarContacto = async (id) => {
     const confirmar = window.confirm("¿Estás seguro de que deseas eliminar este contacto?");
     if (!confirmar) return;
@@ -142,7 +165,43 @@ const Contactos = () => {
     }
   };
 
-  // --- UI ---
+  // ===== Alternar Favorito (mueve/saca del grupo 'Favoritos') =====
+  const toggleFavorito = async (contacto) => {
+    if (!idFavoritos) {
+      alert('No existe el grupo "Favoritos". Créalo primero.');
+      return;
+    }
+    try {
+      const nuevoGrupo = Number(contacto.grupo_id) === Number(idFavoritos) ? null : idFavoritos;
+
+      // Usamos PUT con los datos mínimos para que tu backend no falle.
+      // IMPORTANTE: enviar codigo_pais para que el backend recalcule whatsapp sin romperlo.
+      await fetch(`http://localhost:3000/api/contactos/${contacto.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nombre: contacto.nombre ?? '',
+          telefono_fijo: contacto.telefono_fijo ?? '',
+          celular: contacto.celular ?? '',
+          direccion: contacto.direccion ?? '',
+          email: contacto.email ?? '',
+          facebook: contacto.facebook ?? '',
+          fecha_nacimiento: contacto.fecha_nacimiento ?? '',
+          empresa: contacto.empresa ?? '',
+          grupo_id: nuevoGrupo,
+          foto_url: contacto.foto_url ?? '',
+          codigo_pais: contacto.codigo_pais ?? '+591'
+        })
+      });
+
+      cargarContactos();
+    } catch (e) {
+      console.error('Error al alternar favorito:', e);
+      alert('No se pudo actualizar el contacto.');
+    }
+  };
+
+  // ===== UI =====
   return (
     <div className="px-2 py-2">
       {/* Encabezado: Título + Tabs (al lado) + Buscador + Nuevo */}
@@ -152,17 +211,20 @@ const Contactos = () => {
           <div className="flex-1 flex flex-wrap items-center gap-4">
             <h2 className="text-2xl font-bold text-gray-800 dark:text-white">📇 Contactos</h2>
 
-            {/* Tabs de grupos */}
+            {/* Tabs de grupos con conteo */}
             <div className="flex gap-2 flex-wrap">
               {/* Tab "Todos" */}
               <button
                 onClick={() => setGrupoActivo('todos')}
-                className={`px-3 py-1 rounded-full text-sm border
+                className={`px-3 py-1 rounded-full text-sm border flex items-center gap-2
                   ${grupoActivo === 'todos'
                     ? 'bg-blue-600 text-white border-blue-600'
                     : 'bg-transparent text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
               >
-                Todos
+                <span>Todos</span>
+                <span className={`px-2 py-0.5 rounded-full text-xs ${grupoActivo === 'todos' ? 'bg-blue-700 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-100'}`}>
+                  {conteos.todos ?? 0}
+                </span>
               </button>
 
               {/* Tabs dinámicas */}
@@ -172,12 +234,15 @@ const Contactos = () => {
                   <button
                     key={g.id}
                     onClick={() => setGrupoActivo(String(g.id))}
-                    className={`px-3 py-1 rounded-full text-sm border
+                    className={`px-3 py-1 rounded-full text-sm border flex items-center gap-2
                       ${active
                         ? 'bg-blue-600 text-white border-blue-600'
                         : 'bg-transparent text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
                   >
-                    {g.nombre}
+                    <span>{g.nombre}</span>
+                    <span className={`px-2 py-0.5 rounded-full text-xs ${active ? 'bg-blue-700 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-100'}`}>
+                      {conteos[g.id] ?? 0}
+                    </span>
                   </button>
                 );
               })}
@@ -207,7 +272,6 @@ const Contactos = () => {
                   facebook: '',
                   fecha_nacimiento: '',
                   empresa: '',
-                  // por defecto, el grupo de la pestaña activa (si no es "todos")
                   grupo_id: grupoActivo !== 'todos' ? Number(grupoActivo) : '',
                   foto_url: '',
                   archivoFoto: null,
@@ -226,9 +290,9 @@ const Contactos = () => {
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
         {contactos
           .filter((c) => {
-            // 1) Filtro por grupo (pestaña)
+            // filtro por pestaña (grupo)
             const pasaGrupo = grupoActivo === 'todos' || String(c.grupo_id) === String(grupoActivo);
-            // 2) Filtro por texto
+            // filtro por texto
             const texto = busqueda.toLowerCase();
             const pasaTexto =
               (c.nombre || '').toLowerCase().includes(texto) ||
@@ -237,81 +301,100 @@ const Contactos = () => {
               (obtenerNombreGrupo(c.grupo_id) || '').toLowerCase().includes(texto);
             return pasaGrupo && pasaTexto;
           })
-          .map((c) => (
-            <div
-              key={c.id}
-              className="flex p-3 bg-gray-200 dark:bg-gray-800 rounded-lg shadow-md items-start gap-3"
-            >
-              {/* Foto + Ver */}
-              <div className="flex flex-col items-center shrink-0">
-                {c.foto_url ? (
-                  <img
-                    src={`http://localhost:3000${c.foto_url}`}
-                    alt="Foto"
-                    className="w-12 h-12 rounded-full object-cover"
-                  />
-                ) : (
-                  <div className="w-12 h-12 rounded-full bg-gray-400 flex items-center justify-center text-white text-lg">
-                    👤
-                  </div>
-                )}
-                <button
-                  onClick={() => {
-                    setContactoDetalle(c);
-                    setMostrarDetalle(true);
-                  }}
-                  className="mt-2 text-gray-500 dark:text-gray-300 hover:text-black dark:hover:text-white text-lg"
-                  title="Ver detalles"
-                >
-                  <FaEye />
-                </button>
-              </div>
+          .map((c) => {
+            // WhatsApp: usa el guardado; si falta, calcula con +591 (compatibilidad)
+            const waLink = c.whatsapp && c.whatsapp.trim()
+              ? c.whatsapp
+              : buildWa('+591', c.celular);
 
-              {/* Datos */}
-              <div className="flex-1 text-sm text-gray-800 dark:text-gray-100">
-                <h3 className="font-semibold text-base mb-1">{c.nombre}</h3>
-                <p>📱 {c.celular}</p>
-                {c.telefono_fijo && <p>☎️ {c.telefono_fijo}</p>}
-                {c.email && (
-                  <p>
-                    📧{' '}
+            const esFavorito = idFavoritos && Number(c.grupo_id) === Number(idFavoritos);
+
+            return (
+              <div
+                key={c.id}
+                className="flex p-3 bg-gray-200 dark:bg-gray-800 rounded-lg shadow-md items-start gap-3"
+              >
+                {/* Foto + Ver */}
+                <div className="flex flex-col items-center shrink-0">
+                  {c.foto_url ? (
+                    <img
+                      src={`http://localhost:3000${c.foto_url}`}
+                      alt="Foto"
+                      className="w-12 h-12 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-full bg-gray-400 flex items-center justify-center text-white text-lg">
+                      👤
+                    </div>
+                  )}
+                  <button
+                    onClick={() => { setContactoDetalle(c); setMostrarDetalle(true); }}
+                    className="mt-2 text-gray-500 dark:text-gray-300 hover:text-black dark:hover:text-white text-lg"
+                    title="Ver detalles"
+                  >
+                    <FaEye />
+                  </button>
+                </div>
+
+                {/* Datos */}
+                <div className="flex-1 text-sm text-gray-800 dark:text-gray-100">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-base mb-1">{c.nombre}</h3>
+                    {idFavoritos && (
+                      <button
+                        onClick={() => toggleFavorito(c)}
+                        className={`text-base mt-[-2px] ${esFavorito ? 'text-yellow-500 hover:text-yellow-600' : 'text-gray-400 hover:text-gray-500'}`}
+                        title={esFavorito ? 'Quitar de Favoritos' : 'Agregar a Favoritos'}
+                      >
+                        ⭐
+                      </button>
+                    )}
+                  </div>
+                  <p>📱 {c.celular}</p>
+                  {c.telefono_fijo && <p>☎️ {c.telefono_fijo}</p>}
+                  {c.email && (
+                    <p>
+                      📧{' '}
+                      <a
+                        href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(c.email)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 dark:text-blue-400 underline hover:text-blue-800"
+                      >
+                        {c.email}
+                      </a>
+                    </p>
+                  )}
+                </div>
+
+                {/* Íconos */}
+                <div className="flex flex-col items-center justify-start gap-2 pl-2 mt-1">
+                  {waLink && (
                     <a
-                      href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(c.email)}`}
+                      href={waLink}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-blue-600 dark:text-blue-400 underline hover:text-blue-800"
+                      className="text-green-500 hover:text-green-600 text-2xl"
+                      title="WhatsApp"
                     >
-                      {c.email}
+                      <FaWhatsapp />
                     </a>
-                  </p>
-                )}
+                  )}
+                  {c.facebook && (
+                    <a
+                      href={c.facebook}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:text-blue-700 text-2xl"
+                      title="Facebook"
+                    >
+                      <FaFacebookF />
+                    </a>
+                  )}
+                </div>
               </div>
-
-              {/* Íconos */}
-              <div className="flex flex-col items-center justify-start gap-2 pl-2 mt-1">
-                {c.celular && (
-                  <a
-                    href={`https://wa.me/591${c.celular.replace(/\D/g, '')}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-green-500 hover:text-green-600 text-2xl"
-                  >
-                    <FaWhatsapp />
-                  </a>
-                )}
-                {c.facebook && (
-                  <a
-                    href={c.facebook}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 hover:text-blue-700 text-2xl"
-                  >
-                    <FaFacebookF />
-                  </a>
-                )}
-              </div>
-            </div>
-          ))}
+            );
+          })}
       </div>
 
       {/* 🔍 Modal de vista de contacto */}
@@ -338,52 +421,59 @@ const Contactos = () => {
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm px-2">
-              <p><strong>📱 Celular:</strong> {contactoDetalle.celular}</p>
-              <p><strong>☎️ Teléfono fijo:</strong> {contactoDetalle.telefono_fijo || '—'}</p>
-              <p>
-                <strong>📧 Email:</strong>{' '}
-                {contactoDetalle.email ? (
-                  <a
-                    href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(contactoDetalle.email)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 dark:text-blue-400 underline hover:text-blue-800"
-                  >
-                    {contactoDetalle.email}
-                  </a>
-                ) : '—'}
-              </p>
-              <p><strong>🏢 Empresa:</strong> {contactoDetalle.empresa || '—'}</p>
-              <p><strong>📍 Dirección:</strong> {contactoDetalle.direccion || '—'}</p>
-              <p><strong>🎂 Fecha de nacimiento:</strong> {contactoDetalle.fecha_nacimiento || '—'}</p>
-              <p>
-                <strong>🔗 Facebook:</strong>{' '}
-                {contactoDetalle.facebook ? (
-                  <a
-                    href={contactoDetalle.facebook}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 dark:text-blue-400 underline hover:text-blue-800"
-                  >
-                    Ver perfil
-                  </a>
-                ) : '—'}
-              </p>
-              <p>
-                <strong>💬 WhatsApp:</strong>{' '}
-                {contactoDetalle.celular ? (
-                  <a
-                    href={`https://wa.me/591${contactoDetalle.celular.replace(/\D/g, '')}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-green-600 dark:text-green-400 underline hover:text-green-800"
-                  >
-                    Abrir chat
-                  </a>
-                ) : '—'}
-              </p>
-            </div>
+            {(() => {
+              const waLinkDet = contactoDetalle.whatsapp && contactoDetalle.whatsapp.trim()
+                ? contactoDetalle.whatsapp
+                : buildWa('+591', contactoDetalle.celular);
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm px-2">
+                  <p><strong>📱 Celular:</strong> {contactoDetalle.celular}</p>
+                  <p><strong>☎️ Teléfono fijo:</strong> {contactoDetalle.telefono_fijo || '—'}</p>
+                  <p>
+                    <strong>📧 Email:</strong>{' '}
+                    {contactoDetalle.email ? (
+                      <a
+                        href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(contactoDetalle.email)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 dark:text-blue-400 underline hover:text-blue-800"
+                      >
+                        {contactoDetalle.email}
+                      </a>
+                    ) : '—'}
+                  </p>
+                  <p><strong>🏢 Empresa:</strong> {contactoDetalle.empresa || '—'}</p>
+                  <p><strong>📍 Dirección:</strong> {contactoDetalle.direccion || '—'}</p>
+                  <p><strong>🎂 Fecha de nacimiento:</strong> {contactoDetalle.fecha_nacimiento || '—'}</p>
+                  <p>
+                    <strong>🔗 Facebook:</strong>{' '}
+                    {contactoDetalle.facebook ? (
+                      <a
+                        href={contactoDetalle.facebook}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 dark:text-blue-400 underline hover:text-blue-800"
+                      >
+                        Ver perfil
+                      </a>
+                    ) : '—'}
+                  </p>
+                  <p>
+                    <strong>💬 WhatsApp:</strong>{' '}
+                    {waLinkDet ? (
+                      <a
+                        href={waLinkDet}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-green-600 dark:text-green-400 underline hover:text-green-800"
+                      >
+                        Abrir chat
+                      </a>
+                    ) : '—'}
+                  </p>
+                </div>
+              );
+            })()}
 
             <div className="flex justify-end gap-3 mt-6">
               <button
@@ -392,11 +482,11 @@ const Contactos = () => {
                   setNuevoContacto({
                     ...contactoDetalle,
                     archivoFoto: null,
-                    codigo_pais: '+591'
+                    codigo_pais: contactoDetalle.codigo_pais || '+591'
                   });
                   setModoEdicion(true);
                   setContactoEditandoId(contactoDetalle.id);
-                  setGrupoActivo(contactoDetalle.grupo_id ? String(contactoDetalle.grupo_id) : 'todos'); // opcional
+                  setGrupoActivo(contactoDetalle.grupo_id ? String(contactoDetalle.grupo_id) : 'todos');
                   setMostrarModal(true);
                 }}
                 className="px-4 py-1 bg-yellow-500 text-white rounded hover:bg-yellow-600 text-sm"
