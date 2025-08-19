@@ -1,246 +1,279 @@
-// frontend/src/componentes/Contactos.jsx
-import React, { useEffect, useMemo, useState } from 'react';
-import { FaWhatsapp, FaFacebookF, FaEye } from 'react-icons/fa';
+// frontend/src/components/Contactos.jsx
+import React, { useEffect, useMemo, useState } from "react";
+import { FaWhatsapp, FaInstagram, FaEye } from "react-icons/fa";
+import { FaTiktok } from "react-icons/fa6";
 
-const onlyDigits = (s = '') => String(s).replace(/\D/g, '');
-const buildWa = (codigo = '+591', cel = '') => {
+const API = "http://localhost:3000/api";
+
+/* ============================================================
+   Helper para ENVIAR la cookie de sesión en TODAS las peticiones
+   (único cambio funcional para soportar autenticación)
+   ============================================================ */
+const withCreds = (url, opts = {}) => fetch(url, { credentials: "include", ...opts });
+
+/* ================= Helpers ================= */
+const onlyDigits = (s = "") => String(s).replace(/\D/g, "");
+const buildWa = (codigo = "+591", cel = "") => {
   const cc = onlyDigits(codigo);
   const c = onlyDigits(cel);
-  return cc && c ? `https://wa.me/${cc}${c}` : '';
+  return cc && c ? `https://wa.me/${cc}${c}` : "";
 };
+const isEmpty = (v) => v == null || String(v).trim() === "";
 
+/* ================= Componente ================= */
 const Contactos = () => {
   const [contactos, setContactos] = useState([]);
   const [grupos, setGrupos] = useState([]);
-  const [idFavoritos, setIdFavoritos] = useState(null);
-  const [grupoActivo, setGrupoActivo] = useState('todos');
-  const [busqueda, setBusqueda] = useState('');
 
-  const [mostrarModal, setMostrarModal] = useState(false);
-  const [mostrarDetalle, setMostrarDetalle] = useState(false);
+  // Tabs: "favoritos" | "todos" | <id de grupo>
+  const [tab, setTab] = useState("favoritos"); // por defecto Favoritos
+  const [busqueda, setBusqueda] = useState("");
+
+  // Modales
+  const [mostrarModal, setMostrarModal] = useState(false); // crear/editar
+  const [modoEdicion, setModoEdicion] = useState(false);
+  const [contactoEditando, setContactoEditando] = useState(null);
+
+  const [mostrarDetalle, setMostrarDetalle] = useState(false); // ver detalle
   const [contactoDetalle, setContactoDetalle] = useState(null);
 
-  const [modoEdicion, setModoEdicion] = useState(false);
-  const [contactoEditandoId, setContactoEditandoId] = useState(null);
-
-  const [nuevoContacto, setNuevoContacto] = useState({
-    nombre: '',
-    telefono_fijo: '',
-    celular: '',
-    direccion: '',
-    email: '',
-    facebook: '',
-    fecha_nacimiento: '',
-    empresa: '',
-    grupo_id: '',
-    foto_url: '',
-    archivoFoto: null,
-    codigo_pais: '+591' // importante para construir whatsapp en backend
+  // Form (compacto)
+  const [form, setForm] = useState({
+    nombre: "",
+    telefono_fijo: "",
+    celular: "",
+    codigo_pais: "+591",
+    whatsapp: "",
+    direccion: "",
+    email: "",
+    fecha_nacimiento: "",
+    empresa: "",
+    grupo_id: "",
+    favorito: 0,
+    instagram: "",
+    tiktok: "",
+    foto_url: "",       // url que devuelve tu backend al subir
+    archivoFoto: null,  // file para subir
   });
 
-  // ===== Carga de datos =====
-  const cargarContactos = () => {
-    fetch('http://localhost:3000/api/contactos')
-      .then(res => res.json())
-      .then(setContactos)
-      .catch(console.error);
+  /* ============ Cargas ============ */
+  const cargarGrupos = async () => {
+    try {
+      const r = await withCreds(`${API}/grupos`);
+      const data = await r.json();
+      setGrupos(Array.isArray(data) ? data : []);
+    } catch {
+      setGrupos([]);
+    }
   };
-
-  const cargarGrupos = () => {
-    fetch('http://localhost:3000/api/grupos')
-      .then(res => res.json())
-      .then((lista) => {
-        setGrupos(lista);
-        const fav = lista.find(g => (g.nombre || '').toLowerCase() === 'favoritos');
-        setIdFavoritos(fav ? fav.id : null);
-        setGrupoActivo(fav ? String(fav.id) : 'todos'); // default Favoritos si existe
-      })
-      .catch(console.error);
+  const cargarContactos = async () => {
+    try {
+      const r = await withCreds(`${API}/contactos`);
+      const data = await r.json();
+      setContactos(Array.isArray(data) ? data : []);
+    } catch {
+      setContactos([]);
+    }
   };
-
   useEffect(() => {
-    cargarContactos();
     cargarGrupos();
+    cargarContactos();
   }, []);
 
-  // ===== Conteos por pestaña =====
+  /* ============ Conteos para tabs ============ */
   const conteos = useMemo(() => {
-    const counts = { todos: contactos.length };
+    const counts = { todos: contactos.length, favoritos: 0 };
     for (const g of grupos) counts[g.id] = 0;
     for (const c of contactos) {
+      if (c.favorito) counts.favoritos += 1;
       if (c.grupo_id != null && counts[c.grupo_id] != null) counts[c.grupo_id] += 1;
     }
     return counts;
   }, [contactos, grupos]);
 
-  // ===== Helpers =====
-  const handleInputChange = (e) => {
-    const { name, value, files } = e.target;
-    if (name === 'archivoFoto') {
-      setNuevoContacto({ ...nuevoContacto, archivoFoto: files[0] });
-    } else {
-      setNuevoContacto({ ...nuevoContacto, [name]: value });
-    }
-  };
-
-  const obtenerNombreGrupo = (id) => {
-    const grupo = grupos.find((g) => g.id === id);
-    return grupo ? grupo.nombre : '';
-  };
-
-  // ===== Guardar (crear/editar) =====
-  const guardarContacto = async () => {
-    try {
-      let urlFoto = nuevoContacto.foto_url;
-
-      // Subir foto si hay archivo
-      if (nuevoContacto.archivoFoto) {
-        const formData = new FormData();
-        formData.append('foto', nuevoContacto.archivoFoto);
-        const res = await fetch('http://localhost:3000/api/upload', {
-          method: 'POST',
-          body: formData
+  /* ============ Lista filtrada/ordenada ============ */
+  const lista = useMemo(() => {
+    const t = busqueda.toLowerCase();
+    return contactos
+      .filter((c) => {
+        if (tab === "favoritos" && !c.favorito) return false;
+        if (tab !== "favoritos" && tab !== "todos") {
+          if (String(c.grupo_id) !== String(tab)) return false;
+        }
+        if (!isEmpty(t)) {
+          const grupoNombre =
+            grupos.find((g) => String(g.id) === String(c.grupo_id))?.nombre || "";
+          return (
+            (c.nombre || "").toLowerCase().includes(t) ||
+            (c.celular || "").toLowerCase().includes(t) ||
+            (c.telefono_fijo || "").toLowerCase().includes(t) ||
+            (c.email || "").toLowerCase().includes(t) ||
+            (c.empresa || "").toLowerCase().includes(t) ||
+            grupoNombre.toLowerCase().includes(t) ||
+            (c.instagram || "").toLowerCase().includes(t) ||
+            (c.tiktok || "").toLowerCase().includes(t)
+          );
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        if (b.favorito !== a.favorito) return b.favorito - a.favorito;
+        return String(a.nombre || "").localeCompare(String(b.nombre || ""), undefined, {
+          sensitivity: "base",
         });
-        const data = await res.json();
-        urlFoto = data.url;
-      }
-
-      // Armar WhatsApp también en el cliente (el backend igual recalcula)
-      const whatsapp = buildWa(nuevoContacto.codigo_pais, nuevoContacto.celular);
-
-      const contactoAEnviar = {
-        ...nuevoContacto,
-        foto_url: urlFoto,
-        archivoFoto: undefined,
-        whatsapp
-      };
-
-      const method = modoEdicion ? 'PUT' : 'POST';
-      const endpoint = modoEdicion
-        ? `http://localhost:3000/api/contactos/${contactoEditandoId}`
-        : 'http://localhost:3000/api/contactos';
-
-      await fetch(endpoint, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(contactoAEnviar)
       });
+  }, [contactos, grupos, tab, busqueda]);
 
-      // Reset
-      setMostrarModal(false);
-      setModoEdicion(false);
-      setContactoEditandoId(null);
-      setNuevoContacto({
-        nombre: '',
-        telefono_fijo: '',
-        celular: '',
-        direccion: '',
-        email: '',
-        facebook: '',
-        fecha_nacimiento: '',
-        empresa: '',
-        grupo_id: '',
-        foto_url: '',
-        archivoFoto: null,
-        codigo_pais: '+591'
-      });
-      cargarContactos();
-    } catch (error) {
-      console.error('Error al guardar contacto:', error);
-    }
+  /* ============ Acciones ============ */
+  const abrirNuevo = () => {
+    setModoEdicion(false);
+    setContactoEditando(null);
+    setForm({
+      nombre: "",
+      telefono_fijo: "",
+      celular: "",
+      codigo_pais: "+591",
+      whatsapp: "",
+      direccion: "",
+      email: "",
+      fecha_nacimiento: "",
+      empresa: "",
+      grupo_id: tab !== "favoritos" && tab !== "todos" ? Number(tab) : "",
+      favorito: 0,
+      instagram: "",
+      tiktok: "",
+      foto_url: "",
+      archivoFoto: null,
+    });
+    setMostrarModal(true);
+  };
+  const abrirEditar = (c) => {
+    setModoEdicion(true);
+    setContactoEditando(c);
+    setForm({
+      nombre: c.nombre || "",
+      telefono_fijo: c.telefono_fijo || "",
+      celular: c.celular || "",
+      codigo_pais: c.codigo_pais || "+591",
+      whatsapp: c.whatsapp || "",
+      direccion: c.direccion || "",
+      email: c.email || "",
+      fecha_nacimiento: c.fecha_nacimiento || "",
+      empresa: c.empresa || "",
+      grupo_id: c.grupo_id ?? "",
+      favorito: c.favorito ? 1 : 0,
+      instagram: c.instagram || "",
+      tiktok: c.tiktok || "",
+      foto_url: c.foto_url || "",
+      archivoFoto: null,
+    });
+    setMostrarModal(true);
+  };
+  const subirFoto = async () => {
+    if (!form.archivoFoto) return;
+    const fd = new FormData();
+    fd.append("foto", form.archivoFoto);
+    const up = await withCreds(`${API}/upload`, { method: "POST", body: fd });
+    const data = await up.json();
+    if (data?.url) setForm((s) => ({ ...s, foto_url: data.url, archivoFoto: null }));
+  };
+  const guardar = async () => {
+    if (isEmpty(form.nombre) || isEmpty(form.celular)) return;
+    const payload = {
+      ...form,
+      nombre: form.nombre.trim(),
+      telefono_fijo: form.telefono_fijo || "",
+      celular: form.celular || "",
+      codigo_pais: form.codigo_pais || "+591",
+      whatsapp: buildWa(form.codigo_pais, form.celular),
+      direccion: form.direccion || "",
+      email: form.email || "",
+      fecha_nacimiento: form.fecha_nacimiento || "",
+      empresa: form.empresa || "",
+      grupo_id: form.grupo_id === "" ? null : Number(form.grupo_id),
+      favorito: form.favorito ? 1 : 0,
+      archivoFoto: undefined, // no se envía
+    };
+    const url = modoEdicion ? `${API}/contactos/${contactoEditando.id}` : `${API}/contactos`;
+    const method = modoEdicion ? "PUT" : "POST";
+    await withCreds(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    setMostrarModal(false);
+    setModoEdicion(false);
+    setContactoEditando(null);
+    cargarContactos();
+  };
+  const eliminar = async (id) => {
+    if (!window.confirm("¿Eliminar este contacto?")) return;
+    await withCreds(`${API}/contactos/${id}`, { method: "DELETE" });
+    setMostrarDetalle(false);
+    cargarContactos();
   };
 
-  // ===== Eliminar =====
-  const eliminarContacto = async (id) => {
-    const confirmar = window.confirm("¿Estás seguro de que deseas eliminar este contacto?");
-    if (!confirmar) return;
-
+  // Toggle favorito (optimista + PATCH)
+  const toggleFavorito = async (c) => {
+    const nuevo = c.favorito ? 0 : 1;
+    setContactos((prev) => prev.map((x) => (x.id === c.id ? { ...x, favorito: nuevo } : x))); // optimista
     try {
-      await fetch(`http://localhost:3000/api/contactos/${id}`, { method: 'DELETE' });
-      setMostrarDetalle(false);
-      cargarContactos();
-    } catch (error) {
-      console.error("Error al eliminar contacto:", error);
-      alert("No se pudo eliminar el contacto.");
-    }
-  };
-
-  // ===== Alternar Favorito (mueve/saca del grupo 'Favoritos') =====
-  const toggleFavorito = async (contacto) => {
-    if (!idFavoritos) {
-      alert('No existe el grupo "Favoritos". Créalo primero.');
-      return;
-    }
-    try {
-      const nuevoGrupo = Number(contacto.grupo_id) === Number(idFavoritos) ? null : idFavoritos;
-
-      // Usamos PUT con los datos mínimos para que tu backend no falle.
-      // IMPORTANTE: enviar codigo_pais para que el backend recalcule whatsapp sin romperlo.
-      await fetch(`http://localhost:3000/api/contactos/${contacto.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          nombre: contacto.nombre ?? '',
-          telefono_fijo: contacto.telefono_fijo ?? '',
-          celular: contacto.celular ?? '',
-          direccion: contacto.direccion ?? '',
-          email: contacto.email ?? '',
-          facebook: contacto.facebook ?? '',
-          fecha_nacimiento: contacto.fecha_nacimiento ?? '',
-          empresa: contacto.empresa ?? '',
-          grupo_id: nuevoGrupo,
-          foto_url: contacto.foto_url ?? '',
-          codigo_pais: contacto.codigo_pais ?? '+591'
-        })
+      const res = await withCreds(`${API}/contactos/${c.id}/favorito`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ valor: nuevo }),
       });
-
-      cargarContactos();
+      if (!res.ok) throw new Error("PATCH favorito falló");
     } catch (e) {
-      console.error('Error al alternar favorito:', e);
-      alert('No se pudo actualizar el contacto.');
+      // rollback
+      setContactos((prev) => prev.map((x) => (x.id === c.id ? { ...x, favorito: c.favorito } : x)));
+      alert("No se pudo actualizar favorito.");
     }
   };
 
-  // ===== UI =====
+  const nombreGrupo = (id) => grupos.find((g) => String(g.id) === String(id))?.nombre || "";
+
+  /* ================= UI ================= */
   return (
     <div className="px-2 py-2">
-      {/* Encabezado: Título + Tabs (al lado) + Buscador + Nuevo */}
+      {/* Encabezado */}
       <div className="mb-4">
         <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
-          {/* Izquierda: Título + Pestañas */}
+          {/* Izquierda: título + pestañas */}
           <div className="flex-1 flex flex-wrap items-center gap-4">
-            <h2 className="text-2xl font-bold text-gray-800 dark:text-white">📇 Contactos</h2>
-
-            {/* Tabs de grupos con conteo */}
+            <h2 className="text-2xl font-semibold text-gray-900 dark:text-white">📇 Contactos</h2>
             <div className="flex gap-2 flex-wrap">
-              {/* Tab "Todos" */}
               <button
-                onClick={() => setGrupoActivo('todos')}
-                className={`px-3 py-1 rounded-full text-sm border flex items-center gap-2
-                  ${grupoActivo === 'todos'
-                    ? 'bg-blue-600 text-white border-blue-600'
-                    : 'bg-transparent text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
+                onClick={() => setTab("favoritos")}
+                className={`px-3 py-1.5 rounded-full text-sm border flex items-center gap-2
+                ${tab === "favoritos" ? "bg-blue-600 text-white border-blue-600" : "bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-700"}`}
+              >
+                <span>★ Favoritos</span>
+                <span className={`px-2 py-0.5 rounded-full text-xs ${tab === "favoritos" ? "bg-blue-700 text-white" : "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-100"}`}>
+                  {conteos.favoritos ?? 0}
+                </span>
+              </button>
+              <button
+                onClick={() => setTab("todos")}
+                className={`px-3 py-1.5 rounded-full text-sm border flex items-center gap-2
+                ${tab === "todos" ? "bg-blue-600 text-white border-blue-600" : "bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-700"}`}
               >
                 <span>Todos</span>
-                <span className={`px-2 py-0.5 rounded-full text-xs ${grupoActivo === 'todos' ? 'bg-blue-700 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-100'}`}>
+                <span className={`px-2 py-0.5 rounded-full text-xs ${tab === "todos" ? "bg-blue-700 text-white" : "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-100"}`}>
                   {conteos.todos ?? 0}
                 </span>
               </button>
-
-              {/* Tabs dinámicas */}
-              {grupos.map(g => {
-                const active = String(g.id) === String(grupoActivo);
+              {grupos.map((g) => {
+                const active = String(tab) === String(g.id);
                 return (
                   <button
                     key={g.id}
-                    onClick={() => setGrupoActivo(String(g.id))}
-                    className={`px-3 py-1 rounded-full text-sm border flex items-center gap-2
-                      ${active
-                        ? 'bg-blue-600 text-white border-blue-600'
-                        : 'bg-transparent text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
+                    onClick={() => setTab(String(g.id))}
+                    className={`px-3 py-1.5 rounded-full text-sm border flex items-center gap-2
+                      ${active ? "bg-blue-600 text-white border-blue-600" : "bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-700"}`}
                   >
                     <span>{g.nombre}</span>
-                    <span className={`px-2 py-0.5 rounded-full text-xs ${active ? 'bg-blue-700 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-100'}`}>
+                    <span className={`px-2 py-0.5 rounded-full text-xs ${active ? "bg-blue-700 text-white" : "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-100"}`}>
                       {conteos[g.id] ?? 0}
                     </span>
                   </button>
@@ -249,38 +282,23 @@ const Contactos = () => {
             </div>
           </div>
 
-          {/* Derecha: Buscador + Botón nuevo */}
+          {/* Derecha: buscador + nuevo */}
           <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
             <input
               type="text"
-              placeholder="🔍 Buscar (nombre, celular, empresa, grupo)"
+              placeholder="🔍 Buscar por nombre, teléfono, email, empresa, Instagram"
               value={busqueda}
               onChange={(e) => setBusqueda(e.target.value)}
-              className="w-full sm:w-80 px-3 py-2 border rounded dark:bg-gray-800 dark:text-white border-gray-300 dark:border-gray-700"
+              className="w-full sm:w-64 px-3 py-2 rounded-xl border border-gray-300 dark:border-gray-700
+                        bg-white dark:bg-gray-900 text-gray-900 dark:text-white
+                        focus:outline-none focus:ring-2 focus:ring-blue-400"
             />
+
             <button
-              onClick={() => {
-                setMostrarModal(true);
-                setModoEdicion(false);
-                setContactoEditandoId(null);
-                setNuevoContacto({
-                  nombre: '',
-                  telefono_fijo: '',
-                  celular: '',
-                  direccion: '',
-                  email: '',
-                  facebook: '',
-                  fecha_nacimiento: '',
-                  empresa: '',
-                  grupo_id: grupoActivo !== 'todos' ? Number(grupoActivo) : '',
-                  foto_url: '',
-                  archivoFoto: null,
-                  codigo_pais: '+591'
-                });
-              }}
-              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+              onClick={abrirNuevo}
+              className="px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-800 transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
             >
-              ➕ Nuevo contacto
+              ➕ Nuevo
             </button>
           </div>
         </div>
@@ -288,339 +306,297 @@ const Contactos = () => {
 
       {/* Tarjetas */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-        {contactos
-          .filter((c) => {
-            // filtro por pestaña (grupo)
-            const pasaGrupo = grupoActivo === 'todos' || String(c.grupo_id) === String(grupoActivo);
-            // filtro por texto
-            const texto = busqueda.toLowerCase();
-            const pasaTexto =
-              (c.nombre || '').toLowerCase().includes(texto) ||
-              (c.celular || '').toLowerCase().includes(texto) ||
-              (c.empresa || '').toLowerCase().includes(texto) ||
-              (obtenerNombreGrupo(c.grupo_id) || '').toLowerCase().includes(texto);
-            return pasaGrupo && pasaTexto;
-          })
-          .map((c) => {
-            // WhatsApp: usa el guardado; si falta, calcula con +591 (compatibilidad)
-            const waLink = c.whatsapp && c.whatsapp.trim()
-              ? c.whatsapp
-              : buildWa('+591', c.celular);
+        {lista.length === 0 && (
+          <div className="col-span-full text-center py-10 text-gray-500 dark:text-gray-400">
+            No hay contactos para mostrar.
+          </div>
+        )}
 
-            const esFavorito = idFavoritos && Number(c.grupo_id) === Number(idFavoritos);
+        {lista.map((c) => {
+          const wa = buildWa(c.codigo_pais, c.celular);
+          const esFav = !!c.favorito;
+          const urlIg = c.instagram
+            ? (c.instagram.startsWith("http")
+                ? c.instagram
+                : `https://instagram.com/${String(c.instagram).replace(/^@/, "")}`)
+            : "";
+          const urlTk = c.tiktok
+            ? (c.tiktok.startsWith("http")
+                ? c.tiktok
+                : `https://www.tiktok.com/@${String(c.tiktok).replace(/^@/, "")}`)
+            : "";
 
-            return (
-              <div
-                key={c.id}
-                className="flex p-3 bg-gray-200 dark:bg-gray-800 rounded-lg shadow-md items-start gap-3"
-              >
-                {/* Foto + Ver */}
-                <div className="flex flex-col items-center shrink-0">
+          return (
+            <div
+              key={c.id}
+              className="flex items-start gap-3 p-3 rounded-2xl bg-gray-200 dark:bg-gray-800 ring-1 ring-black/5 shadow-sm"
+            >
+              {/* Columna foto + ojo debajo */}
+              <div className="flex flex-col items-center shrink-0">
+                <button
+                  onClick={() => {
+                    setContactoDetalle(c);
+                    setMostrarDetalle(true);
+                  }}
+                  className="mt-2 text-gray-500 dark:text-gray-300 hover:text-black dark:hover:text-white text-lg"
+                  title="Ver detalles"
+                >
                   {c.foto_url ? (
                     <img
                       src={`http://localhost:3000${c.foto_url}`}
                       alt="Foto"
-                      className="w-12 h-12 rounded-full object-cover"
+                      className="w-20 h-20 object-cover rounded-full"
                     />
                   ) : (
                     <div className="w-12 h-12 rounded-full bg-gray-400 flex items-center justify-center text-white text-lg">
                       👤
                     </div>
                   )}
+                </button>
+              </div>
+
+              {/* Columna datos + estrella + accesos */}
+              <div className="flex-1 min-w-0">
+                {/* Nombre + estrella */}
+                <div className="flex items-start justify-between">
+                  <h3 className="text-base font-semibold text-gray-800 dark:text-gray-100 truncate">
+                    {c.nombre}
+                  </h3>
                   <button
-                    onClick={() => { setContactoDetalle(c); setMostrarDetalle(true); }}
-                    className="mt-2 text-gray-500 dark:text-gray-300 hover:text-black dark:hover:text-white text-lg"
-                    title="Ver detalles"
+                    onClick={() => toggleFavorito(c)}
+                    className={`text-2xl ${
+                      esFav ? "text-yellow-500 hover:text-yellow-600" : "text-gray-400 hover:text-gray-500"
+                    }`}
+                    title={esFav ? "Quitar de favoritos" : "Marcar favorito"}
                   >
-                    <FaEye />
+                    {esFav ? "★" : "☆"}
                   </button>
                 </div>
 
-                {/* Datos */}
-                <div className="flex-1 text-sm text-gray-800 dark:text-gray-100">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-semibold text-base mb-1">{c.nombre}</h3>
-                    {idFavoritos && (
-                      <button
-                        onClick={() => toggleFavorito(c)}
-                        className={`text-base mt-[-2px] ${esFavorito ? 'text-yellow-500 hover:text-yellow-600' : 'text-gray-400 hover:text-gray-500'}`}
-                        title={esFavorito ? 'Quitar de Favoritos' : 'Agregar a Favoritos'}
-                      >
-                        ⭐
-                      </button>
-                    )}
-                  </div>
-                  <p>📱 {c.celular}</p>
-                  {c.telefono_fijo && <p>☎️ {c.telefono_fijo}</p>}
-                  {c.email && (
-                    <p>
-                      📧{' '}
-                      <a
-                        href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(c.email)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-600 dark:text-blue-400 underline hover:text-blue-800"
-                      >
-                        {c.email}
-                      </a>
-                    </p>
-                  )}
+                {/* Datos breves (una o dos líneas máximo) */}
+                <div className="mt-0.5 text-[13px] leading-5 text-gray-900 dark:text-gray-100">
+                  <div className="truncate">📱 {c.celular || "—"}</div>
+                  {c.email && <div className="truncate">✉️ {c.email}</div>}
                 </div>
 
-                {/* Íconos */}
-                <div className="flex flex-col items-center justify-start gap-2 pl-2 mt-1">
-                  {waLink && (
+                {/* Accesos rápidos */}
+                <div className="mt-2 flex items-center gap-2">
+                  {wa && (
                     <a
-                      href={waLink}
+                      href={wa}
                       target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-green-500 hover:text-green-600 text-2xl"
+                      rel="noreferrer"
+                      className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-green-500 text-white"
                       title="WhatsApp"
                     >
                       <FaWhatsapp />
                     </a>
                   )}
-                  {c.facebook && (
+
+                  {urlIg && (
                     <a
-                      href={c.facebook}
+                      href={urlIg}
                       target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 hover:text-blue-700 text-2xl"
-                      title="Facebook"
+                      rel="noreferrer"
+                      className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-600 text-white"
+                      title="Instagram"
                     >
-                      <FaFacebookF />
+                      <FaInstagram />
+                    </a>
+                  )}
+
+                  {urlTk && (
+                    <a
+                      href={urlTk}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-black text-white"
+                      title="TikTok"
+                    >
+                      <FaTiktok />
                     </a>
                   )}
                 </div>
               </div>
-            );
-          })}
+            </div>
+          );
+        })}
       </div>
 
-      {/* 🔍 Modal de vista de contacto */}
+      {/* Modal detalle */}
       {mostrarDetalle && contactoDetalle && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-900 text-gray-900 dark:text-white rounded p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+          <div className="bg-white dark:bg-gray-900 text-gray-900 dark:text-white rounded-2xl p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto shadow-xl ring-1 ring-black/10">
             <h3 className="text-xl font-bold mb-4 text-center">👁️ Detalle del contacto</h3>
 
             <div className="flex flex-col items-center mb-4">
               {contactoDetalle.foto_url ? (
-                <img
-                  src={`http://localhost:3000${contactoDetalle.foto_url}`}
-                  alt="Foto grande"
-                  className="w-40 h-40 rounded-full object-cover shadow-lg border-4 border-white dark:border-gray-700"
-                />
+                <img src={`http://localhost:3000${contactoDetalle.foto_url}`} alt="Foto" className="w-40 h-40 rounded-full object-cover shadow-lg border-4 border-white dark:border-gray-700" />
               ) : (
-                <div className="w-40 h-40 rounded-full bg-gray-400 flex items-center justify-center text-5xl text-white mb-2">
-                  👤
-                </div>
+                <div className="w-40 h-40 rounded-full bg-gray-400 flex items-center justify-center text-5xl text-white">👤</div>
               )}
               <h4 className="text-2xl font-bold mt-2">{contactoDetalle.nombre}</h4>
-              <p className="text-sm text-gray-600 dark:text-gray-400 italic">
-                {obtenerNombreGrupo(contactoDetalle.grupo_id)}
-              </p>
+              <p className="text-sm text-gray-600 dark:text-gray-400 italic">{nombreGrupo(contactoDetalle.grupo_id) || ""}</p>
             </div>
 
-            {(() => {
-              const waLinkDet = contactoDetalle.whatsapp && contactoDetalle.whatsapp.trim()
-                ? contactoDetalle.whatsapp
-                : buildWa('+591', contactoDetalle.celular);
-              return (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm px-2">
-                  <p><strong>📱 Celular:</strong> {contactoDetalle.celular}</p>
-                  <p><strong>☎️ Teléfono fijo:</strong> {contactoDetalle.telefono_fijo || '—'}</p>
-                  <p>
-                    <strong>📧 Email:</strong>{' '}
-                    {contactoDetalle.email ? (
-                      <a
-                        href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(contactoDetalle.email)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-600 dark:text-blue-400 underline hover:text-blue-800"
-                      >
-                        {contactoDetalle.email}
-                      </a>
-                    ) : '—'}
-                  </p>
-                  <p><strong>🏢 Empresa:</strong> {contactoDetalle.empresa || '—'}</p>
-                  <p><strong>📍 Dirección:</strong> {contactoDetalle.direccion || '—'}</p>
-                  <p><strong>🎂 Fecha de nacimiento:</strong> {contactoDetalle.fecha_nacimiento || '—'}</p>
-                  <p>
-                    <strong>🔗 Facebook:</strong>{' '}
-                    {contactoDetalle.facebook ? (
-                      <a
-                        href={contactoDetalle.facebook}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-600 dark:text-blue-400 underline hover:text-blue-800"
-                      >
-                        Ver perfil
-                      </a>
-                    ) : '—'}
-                  </p>
-                  <p>
-                    <strong>💬 WhatsApp:</strong>{' '}
-                    {waLinkDet ? (
-                      <a
-                        href={waLinkDet}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-green-600 dark:text-green-400 underline hover:text-green-800"
-                      >
-                        Abrir chat
-                      </a>
-                    ) : '—'}
-                  </p>
-                </div>
-              );
-            })()}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm px-2">
+              <p><strong>📱 Celular:</strong> {contactoDetalle.celular || "—"}</p>
+              <p><strong>☎️ Fijo:</strong> {contactoDetalle.telefono_fijo || "—"}</p>
+              <p><strong>✉️ Email:</strong> {contactoDetalle.email || "—"}</p>
+              <p><strong>🏢 Empresa:</strong> {contactoDetalle.empresa || "—"}</p>
+              <p><strong>📍 Dirección:</strong> {contactoDetalle.direccion || "—"}</p>
+              <p><strong>🎂 Nacimiento:</strong> {contactoDetalle.fecha_nacimiento || "—"}</p>
+              <p><strong>📷 Instagram:</strong> {contactoDetalle.instagram || "—"}</p>
+              <p><strong>🎵 TikTok:</strong> {contactoDetalle.tiktok || "—"}</p>
+              <p><strong>💬 WhatsApp:</strong> {contactoDetalle.whatsapp || "—"}</p>
+            </div>
 
             <div className="flex justify-end gap-3 mt-6">
-              <button
-                onClick={() => {
-                  setMostrarDetalle(false);
-                  setNuevoContacto({
-                    ...contactoDetalle,
-                    archivoFoto: null,
-                    codigo_pais: contactoDetalle.codigo_pais || '+591'
-                  });
-                  setModoEdicion(true);
-                  setContactoEditandoId(contactoDetalle.id);
-                  setGrupoActivo(contactoDetalle.grupo_id ? String(contactoDetalle.grupo_id) : 'todos');
-                  setMostrarModal(true);
-                }}
-                className="px-4 py-1 bg-yellow-500 text-white rounded hover:bg-yellow-600 text-sm"
-              >
-                Editar
-              </button>
-              <button
-                onClick={() => eliminarContacto(contactoDetalle.id)}
-                className="px-4 py-1 bg-red-600 text-white rounded hover:bg-red-700 text-sm"
-              >
-                Eliminar
-              </button>
-              <button
-                onClick={() => setMostrarDetalle(false)}
-                className="px-4 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm"
-              >
-                Cerrar
-              </button>
+              <button onClick={() => { setMostrarDetalle(false); abrirEditar(contactoDetalle); }} className="px-3 py-1 text-xs rounded-lg bg-amber-500 text-white hover:bg-amber-600">Editar</button>
+              <button onClick={() => eliminar(contactoDetalle.id)} className="px-3 py-1 text-xs rounded-lg bg-red-600 text-white hover:bg-red-700">Eliminar</button>
+              <button onClick={() => setMostrarDetalle(false)} className="px-3 py-1 text-xs rounded-lg bg-gray-600 text-white hover:bg-gray-700">Cerrar</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ➕ Modal de nuevo/editar contacto */}
+      {/* Modal crear/editar (compacto) */}
       {mostrarModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-900 text-gray-900 dark:text-white rounded p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <h3 className="text-xl font-bold mb-4">{modoEdicion ? '✏️ Editar contacto' : '➕ Nuevo contacto'}</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* NOMBRE */}
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+          <div className="bg-white dark:bg-gray-900 text-gray-900 dark:text-white rounded-2xl p-5 w-full max-w-3xl max-h-[90vh] overflow-y-auto shadow-xl ring-1 ring-black/10">
+            <h3 className="text-lg md:text-xl font-bold mb-3">{modoEdicion ? "✏️ Editar contacto" : "➕ Nuevo contacto"}</h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {/* Nombre */}
               <div className="md:col-span-2">
-                <label className="block text-xs font-medium mb-1 text-gray-700 dark:text-gray-300">
-                  Nombre <span className="text-red-500">*</span>
-                </label>
+                <label className="block text-xs font-medium mb-1">Nombre <span className="text-red-500">*</span></label>
                 <input
                   type="text"
-                  name="nombre"
-                  value={nuevoContacto.nombre}
-                  onChange={handleInputChange}
-                  required
-                  className={`w-full px-2 py-1 rounded border text-sm focus:outline-none focus:ring-2
-                    ${!nuevoContacto.nombre.trim()
-                      ? 'border-red-500 focus:ring-red-400'
-                      : 'border-gray-300 dark:border-gray-700 focus:ring-blue-500'}
-                    dark:bg-gray-800 dark:text-white`}
+                  value={form.nombre}
+                  onChange={(e) => setForm((s) => ({ ...s, nombre: e.target.value }))}
+                  className={`w-full px-3 py-2 rounded-xl border text-sm focus:outline-none focus:ring-2
+                  ${isEmpty(form.nombre) ? "border-red-500 focus:ring-red-400" : "border-gray-300 dark:border-gray-700 focus:ring-blue-400"} bg-white dark:bg-gray-900`}
                 />
               </div>
 
-              {/* CELULAR + CÓDIGO */}
+              {/* === Fila teléfonos: Celular (select + input) a la izq / Fijo a la der === */}
               <div>
-                <label className="block text-xs font-medium mb-1 text-gray-700 dark:text-gray-300">
+                <label className="block text-xs font-medium mb-1">
                   Celular <span className="text-red-500">*</span>
                 </label>
-                <div className="flex gap-2">
+                <div className="grid grid-cols-[6.5rem,1fr] gap-2">
                   <select
-                    name="codigo_pais"
-                    value={nuevoContacto.codigo_pais}
-                    onChange={handleInputChange}
-                    className="w-24 px-2 py-1 rounded border text-sm border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                    value={form.codigo_pais}
+                    onChange={(e) => setForm(s => ({ ...s, codigo_pais: e.target.value }))}
+                    className="w-full h-10 px-2 rounded-xl border border-gray-300 dark:border-gray-700
+                              bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-400"
                   >
-                    <option value="+591">🇧🇴 +591</option>
-                    <option value="+54">🇦🇷 +54</option>
-                    <option value="+56">🇨🇱 +56</option>
-                    <option value="+57">🇨🇴 +57</option>
-                    <option value="+593">🇪🇨 +593</option>
-                    <option value="+502">🇬🇹 +502</option>
-                    <option value="+504">🇭🇳 +504</option>
-                    <option value="+52">🇲🇽 +52</option>
-                    <option value="+505">🇳🇮 +505</option>
-                    <option value="+507">🇵🇦 +507</option>
-                    <option value="+595">🇵🇾 +595</option>
-                    <option value="+51">🇵🇪 +51</option>
-                    <option value="+1">🇩🇴 +1</option>
-                    <option value="+598">🇺🇾 +598</option>
-                    <option value="+58">🇻🇪 +58</option>
+                    <option value="+591">BO +591</option>
+                    <option value="+54">AR +54</option>
+                    <option value="+55">BR +55</option>
+                    <option value="+56">CL +56</option>
+                    <option value="+57">CO +57</option>
+                    <option value="+593">EC +593</option>
+                    <option value="+52">MX +52</option>
+                    <option value="+51">PE +51</option>
+                    <option value="+598">UY +598</option>
+                    <option value="+58">VE +58</option>
                   </select>
+
                   <input
                     type="text"
-                    name="celular"
-                    value={nuevoContacto.celular}
-                    onChange={handleInputChange}
-                    required
-                    className={`w-full px-2 py-1 rounded border text-sm focus:outline-none focus:ring-2
-                      ${!nuevoContacto.celular.trim()
-                        ? 'border-red-500 focus:ring-red-400'
-                        : 'border-gray-300 dark:border-gray-700 focus:ring-blue-500'}
-                      dark:bg-gray-800 dark:text-white`}
+                    placeholder="Celular"
+                    value={form.celular}
+                    onChange={(e) => setForm(s => ({ ...s, celular: e.target.value }))}
+                    className={`w-full h-10 px-3 rounded-xl border text-sm focus:outline-none focus:ring-2
+                      {!form.celular?.trim() ? "border-red-500 focus:ring-red-400" : "border-gray-300 dark:border-gray-700 focus:ring-blue-400"}
+                      bg-white dark:bg-gray-900 text-gray-900 dark:text-white`}
                   />
                 </div>
               </div>
 
-              {/* RESTO DE CAMPOS */}
-              {[
-                { label: 'Teléfono fijo', name: 'telefono_fijo' },
-                { label: 'Dirección', name: 'direccion' },
-                { label: 'Email', name: 'email' },
-                { label: 'Facebook', name: 'facebook' },
-                { label: 'Fecha de nacimiento', name: 'fecha_nacimiento', type: 'date' },
-                { label: 'Empresa', name: 'empresa' }
-              ].map(({ label, name, required = false, type = 'text' }) => (
-                <div key={name}>
-                  <label className="block text-xs font-medium mb-1 text-gray-700 dark:text-gray-300">
-                    {label}{required && <span className="text-red-500">*</span>}
-                  </label>
+              <div>
+                <label className="block text-xs font-medium mb-1">Teléfono fijo</label>
+                <input
+                  type="text"
+                  placeholder="Teléfono fijo"
+                  value={form.telefono_fijo}
+                  onChange={(e) => setForm(s => ({ ...s, telefono_fijo: e.target.value }))}
+                  className="w-full h-10 px-3 rounded-xl border text-sm focus:outline-none focus:ring-2
+                            border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+                />
+              </div>
+
+              {/* Dirección / Email / Cumpleaños en la misma fila */}
+              <div className=" md:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-medium mb-1">Dirección</label>
                   <input
-                    type={type}
-                    name={name}
-                    value={nuevoContacto[name]}
-                    onChange={handleInputChange}
-                    required={required}
-                    className={`w-full px-2 py-1 rounded border text-sm focus:outline-none focus:ring-2 ${
-                      required && !nuevoContacto[name]?.trim()
-                        ? 'border-red-500 focus:ring-red-400'
-                        : 'border-gray-300 dark:border-gray-700 focus:ring-blue-500 dark:bg-gray-800'
-                    }`}
+                    type="text"
+                    value={form.direccion}
+                    onChange={(e) => setForm((s) => ({ ...s, direccion: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-xl border text-sm focus:outline-none focus:ring-2 border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
                   />
                 </div>
-              ))}
+                <div>
+                  <label className="block text-xs font-medium mb-1">Email</label>
+                  <input
+                    type="email"
+                    value={form.email}
+                    onChange={(e) => setForm((s) => ({ ...s, email: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-xl border text-sm focus:outline-none focus:ring-2 border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1">Cumpleaños</label>
+                  <input
+                    type="date"
+                    value={form.fecha_nacimiento || ""}
+                    onChange={(e) => setForm((s) => ({ ...s, fecha_nacimiento: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-xl border text-sm focus:outline-none focus:ring-2 border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
+                  />
+                </div>
+              </div>
 
-              {/* Grupo */}
+
+              {/* Instagram / TikTok */}
               <div>
-                <label className="block text-xs font-medium mb-1 text-gray-700 dark:text-gray-300">
-                  Grupo <span className="text-red-500">*</span>
-                </label>
+                <label className="block text-xs font-medium mb-1">Instagram</label>
+                <input
+                  type="text"
+                  value={form.instagram}
+                  onChange={(e) => setForm((s) => ({ ...s, instagram: e.target.value }))}
+                  placeholder="@usuario o url"
+                  className="w-full px-3 py-2 rounded-xl border text-sm focus:outline-none focus:ring-2 border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1">TikTok</label>
+                <input
+                  type="text"
+                  value={form.tiktok}
+                  onChange={(e) => setForm((s) => ({ ...s, tiktok: e.target.value }))}
+                  placeholder="@usuario o url"
+                  className="w-full px-3 py-2 rounded-xl border text-sm focus:outline-none focus:ring-2 border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
+                />
+              </div>
+
+              {/* Empresa / Grupo */}
+              <div>
+                <label className="block text-xs font-medium mb-1">Empresa</label>
+                <input
+                  type="text"
+                  value={form.empresa}
+                  onChange={(e) => setForm((s) => ({ ...s, empresa: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-xl border text-sm focus:outline-none focus:ring-2 border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1">Grupo</label>
                 <select
-                  name="grupo_id"
-                  value={nuevoContacto.grupo_id}
-                  onChange={handleInputChange}
-                  required
-                  className={`w-full px-2 py-1 rounded border text-sm focus:outline-none focus:ring-2
-                    ${!nuevoContacto.grupo_id
-                      ? 'border-red-500 focus:ring-red-400'
-                      : 'border-gray-300 dark:border-gray-700 focus:ring-blue-500'}
-                    bg-white text-black dark:bg-gray-800 dark:text-white`}
+                  value={form.grupo_id === null ? "" : form.grupo_id}
+                  onChange={(e) => setForm((s) => ({ ...s, grupo_id: e.target.value === "" ? "" : Number(e.target.value) }))}
+                  className="w-full px-3 py-2 rounded-xl border text-sm focus:outline-none focus:ring-2 border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
                 >
                   <option value="">-- Selecciona grupo --</option>
                   {grupos.map((g) => (
@@ -629,42 +605,50 @@ const Contactos = () => {
                 </select>
               </div>
 
-              {/* Foto */}
+              {/* Foto: archivo + subir + checkbox favorito (igual que tenías) */}
               <div className="md:col-span-2">
-                <label className="block text-xs font-medium mb-1 text-gray-700 dark:text-gray-300">
-                  Foto
-                </label>
-                <input
-                  type="file"
-                  name="archivoFoto"
-                  accept="image/*"
-                  onChange={handleInputChange}
-                  className="w-full text-sm px-2 py-1 rounded border border-gray-300 dark:border-gray-700 dark:bg-gray-800"
-                />
+                <label className="block text-xs font-medium mb-1">Foto (subir archivo)</label>
+                <div className="flex gap-2 items-center">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => setForm((s) => ({ ...s, archivoFoto: e.target.files?.[0] || null }))}
+                    className="text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={subirFoto}
+                    disabled={!form.archivoFoto}
+                    className="px-3 py-1 text-xs rounded-lg bg-blue-600 text-white disabled:opacity-50"
+                  >
+                    Subir foto
+                  </button>
+                  {form.foto_url && (
+                    <span className="text-xs text-gray-600 dark:text-gray-300 truncate">
+                      Guardada ✔
+                    </span>
+                  )}
+
+                  <div className="md:col-span-2 px-8">
+                    <label className="inline-flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={!!form.favorito}
+                        onChange={(e) => setForm((s) => ({ ...s, favorito: e.target.checked ? 1 : 0 }))}
+                      />
+                      <span>Marcar como favorito</span>
+                    </label>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div className="text-right mt-4 flex justify-end gap-3">
-              <button
-                onClick={() => {
-                  setMostrarModal(false);
-                  setModoEdicion(false);
-                  setContactoEditandoId(null);
-                }}
-                className="px-4 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm"
-              >
+            <div className="mt-3 flex justify-end gap-3">
+              <button onClick={() => { setMostrarModal(false); setModoEdicion(false); setContactoEditando(null); }} className="px-4 py-1 rounded-xl bg-gray-600 text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-400 text-sm">
                 Cancelar
               </button>
-              <button
-                onClick={guardarContacto}
-                disabled={
-                  !nuevoContacto.nombre.trim() ||
-                  !nuevoContacto.celular.trim() ||
-                  !nuevoContacto.grupo_id
-                }
-                className="px-4 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {modoEdicion ? 'Guardar cambios' : 'Guardar'}
+              <button onClick={guardar} disabled={isEmpty(form.nombre) || isEmpty(form.celular)} className="px-4 py-1 rounded-xl bg-green-600 text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-400 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                {modoEdicion ? "Guardar cambios" : "Guardar"}
               </button>
             </div>
           </div>
@@ -673,5 +657,6 @@ const Contactos = () => {
     </div>
   );
 };
-
 export default Contactos;
+
+

@@ -1,6 +1,7 @@
+// frontend/src/components/Notas.jsx
 import React, { useEffect, useMemo, useState } from "react";
-import { MdArchive, MdUnarchive } from "react-icons/md";
-import { BsPinFill, BsPinAngleFill } from "react-icons/bs";
+import { BsPinFill, BsPinAngle } from "react-icons/bs";
+import { FaBoxArchive, FaBoxOpen } from "react-icons/fa6";
 
 /* ================= Config ================= */
 const API = "http://localhost:3000/api";
@@ -11,10 +12,10 @@ const COLORS = [
   { key: "sky",     bg: "bg-sky-200 dark:bg-sky-800", ring: "ring-sky-400" },
   { key: "violet",  bg: "bg-violet-200 dark:bg-violet-800", ring: "ring-violet-400" },
   { key: "rose",    bg: "bg-rose-200 dark:bg-rose-800", ring: "ring-rose-400" },
-  { key: "orange",  bg: "bg-orange-200 dark:bg-orange-800", ring: "ring-orange-400" },
-  { key: "teal",    bg: "bg-teal-200 dark:bg-teal-800", ring: "ring-teal-400" },
-  { key: "pink",    bg: "bg-pink-200 dark:bg-pink-800", ring: "ring-pink-400" },
 ];
+
+/* ===== helper ÚNICO añadido para sesión (cookies) ===== */
+const withCreds = (url, opts = {}) => fetch(url, { credentials: "include", ...opts });
 
 /* ================= Helpers ================= */
 const fmtDateTime = (s) => {
@@ -55,12 +56,6 @@ const Notas = () => {
     contactosIds: [],
   });
 
-  // Checkbox para mostrar/ocultar el selector de contactos en el modal
-  const [incluirContactos, setIncluirContactos] = useState(false);
-
-  // Preferencia persistente para "nueva nota"
-  const PREFER_KEY = "preferIncluirContactos";
-
   /* ============ Carga ============ */
   const cargarNotas = async () => {
     setCargandoNotas(true);
@@ -70,7 +65,7 @@ const Notas = () => {
         ordenar: "reciente",
         limit: 200,
       });
-      const r = await fetch(`${API}/notas?${params.toString()}`);
+      const r = await withCreds(`${API}/notas?${params.toString()}`);
       const data = await r.json();
       setNotas(Array.isArray(data) ? data : []);
     } catch (e) {
@@ -83,7 +78,7 @@ const Notas = () => {
 
   const cargarContactos = async () => {
     try {
-      const r = await fetch(`${API}/contactos`);
+      const r = await withCreds(`${API}/contactos`);
       const data = await r.json();
       setContactos(Array.isArray(data) ? data : []);
     } catch (e) {
@@ -98,13 +93,6 @@ const Notas = () => {
   useEffect(() => {
     cargarNotas();
   }, [tabEstado]);
-
-  // Cargar preferencia al montar
-  useEffect(() => {
-    const raw = localStorage.getItem(PREFER_KEY);
-    if (raw === "1") setIncluirContactos(true);
-    if (raw === "0") setIncluirContactos(false);
-  }, []);
 
   /* ============ Filtrado ============ */
   const notasFiltradas = useMemo(() => {
@@ -130,7 +118,7 @@ const Notas = () => {
 
   /* ============ Acciones API ============ */
   const toggleFijada = async (id, valor) => {
-    await fetch(`${API}/notas/${id}/fijar`, {
+    await withCreds(`${API}/notas/${id}/fijar`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(typeof valor === "number" ? { valor } : {}),
@@ -139,7 +127,7 @@ const Notas = () => {
   };
 
   const toggleArchivada = async (id, valor) => {
-    await fetch(`${API}/notas/${id}/archivar`, {
+    await withCreds(`${API}/notas/${id}/archivar`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(typeof valor === "number" ? { valor } : {}),
@@ -149,7 +137,7 @@ const Notas = () => {
 
   const eliminarNota = async (id) => {
     if (!window.confirm("¿Eliminar esta nota?")) return;
-    await fetch(`${API}/notas/${id}`, { method: "DELETE" });
+    await withCreds(`${API}/notas/${id}`, { method: "DELETE" });
     cargarNotas();
   };
 
@@ -163,22 +151,14 @@ const Notas = () => {
       fijada: 0,
       archivada: tabEstado === "a" ? 1 : 0,
       recordatorio_en: "",
-      contactosIds: [], // limpio en nueva
+      contactosIds: filtroContacto !== "todos" ? [Number(filtroContacto)] : [],
     });
-
-    // Leer preferencia guardada para nueva nota
-    const raw = localStorage.getItem(PREFER_KEY);
-    const prefer = raw === "1";
-    setIncluirContactos(prefer);
-
     setMostrarModal(true);
   };
 
   const abrirEditar = (n) => {
     setModoEdicion(true);
     setNotaEditando(n);
-
-    const contactosIds = (n.contactos || []).map((c) => c.id);
     setForm({
       titulo: n.titulo || "",
       contenido: n.contenido || "",
@@ -186,12 +166,8 @@ const Notas = () => {
       fijada: Number(n.fijada) ? 1 : 0,
       archivada: Number(n.archivada) ? 1 : 0,
       recordatorio_en: n.recordatorio_en || "",
-      contactosIds, // los que ya tiene
+      contactosIds: (n.contactos || []).map((c) => c.id),
     });
-
-    // En edición: ON solo si ya tiene contactos
-    setIncluirContactos(contactosIds.length > 0);
-
     setMostrarModal(true);
   };
 
@@ -205,18 +181,17 @@ const Notas = () => {
       fijada: Number(form.fijada) ? 1 : 0,
       archivada: Number(form.archivada) ? 1 : 0,
       recordatorio_en: form.recordatorio_en || null,
-      // Si el checkbox está apagado, no se envían contactos
-      contactosIds: incluirContactos ? form.contactosIds : [],
+      contactosIds: form.contactosIds || [],
     };
 
     if (modoEdicion && notaEditando) {
-      await fetch(`${API}/notas/${notaEditando.id}`, {
+      await withCreds(`${API}/notas/${notaEditando.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
     } else {
-      await fetch(`${API}/notas`, {
+      await withCreds(`${API}/notas`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -229,19 +204,6 @@ const Notas = () => {
     cargarNotas();
   };
 
-  /* ============ Handlers ============ */
-  const handleToggleIncluirContactos = (checked) => {
-    setIncluirContactos(checked);
-    if (!checked) {
-      // si se apaga, limpiamos los contactos seleccionados
-      setForm((s) => ({ ...s, contactosIds: [] }));
-    }
-    // Guardar preferencia SOLO cuando sea "nueva nota" (no edición)
-    if (!modoEdicion) {
-      localStorage.setItem(PREFER_KEY, checked ? "1" : "0");
-    }
-  };
-
   /* ============ UI ============ */
   return (
     <div className="px-2 py-2">
@@ -250,7 +212,7 @@ const Notas = () => {
         <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
           {/* Izq: Título + Tabs + Filtro contacto */}
           <div className="flex-1 flex flex-wrap items-center gap-4">
-            <h2 className="text-2xl md:text-3xl font-semibold text-gray-900 dark:text-white">
+            <h2 className="text-2xl font-semibold text-gray-900 dark:text-white">
               📝 Notas
             </h2>
 
@@ -338,69 +300,74 @@ const Notas = () => {
           notasFiltradas.map((n) => (
             <div
               key={n.id}
-              className={`h-full flex flex-col p-4 rounded-2xl shadow-sm ring-1 ring-inset ring-black/5 ${colorToTailwind(
+              className={`p-4 rounded-2xl shadow-sm ring-1 ring-inset ring-black/5 ${colorToTailwind(
                 n.color
               )}`}
             >
               {/* Cabecera */}
               <div className="flex items-start justify-between gap-2">
-                <div>
-                  <h3 className="text-base md:text-lg font-semibold text-gray-900 dark:text-gray-100">
+                <div className="min-w-0">
+                  <h3 className="text-base md:text-lg font-semibold text-gray-900 dark:text-gray-100 truncate">
                     {n.titulo}
                   </h3>
                   <p className="text-xs text-gray-700 dark:text-gray-300">
-                    {n.fijada ? "Fijada • " : ""}
-                    {n.archivada ? "Archivada • " : ""}
+                    {n.fijada ? "📌 Fijada • " : ""}
+                    {n.archivada ? "🗄️ Archivada • " : ""}
                     {n.recordatorio_en ? `⏰ ${fmtDateTime(n.recordatorio_en)}` : ""}
                   </p>
                 </div>
 
-                {/* Acciones con ICONOS */}
-                <div className="flex gap-1">
-                  {/* Fijar / Desfijar */}
+                {/* Iconos fijar/archivar (restaurados) */}
+                <div className="flex gap-2 shrink-0">
+                  {/* Fijar/Desfijar */}
                   <button
                     onClick={() => toggleFijada(n.id)}
-                    className="px-2 py-1 text-lg rounded-lg hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
-                    aria-label={n.fijada ? "Desfijar" : "Fijar"}
+                    className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-white/70 dark:bg-black/30 hover:bg-white dark:hover:bg-black/50 ring-1 ring-black/10"
                     title={n.fijada ? "Desfijar" : "Fijar"}
                   >
-                    {n.fijada ? <BsPinFill /> : <BsPinAngleFill />}
+                    {n.fijada ? (
+                      <BsPinFill className="text-yellow-600" />
+                    ) : (
+                      <BsPinAngle className="text-gray-600 dark:text-gray-300" />
+                    )}
                   </button>
 
-                  {/* Archivar / Desarchivar */}
+                  {/* Archivar/Desarchivar */}
                   <button
                     onClick={() => toggleArchivada(n.id)}
-                    className="px-2 py-1 text-lg rounded-lg hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
-                    aria-label={n.archivada ? "Desarchivar" : "Archivar"}
+                    className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-white/70 dark:bg-black/30 hover:bg-white dark:hover:bg-black/50 ring-1 ring-black/10"
                     title={n.archivada ? "Desarchivar" : "Archivar"}
                   >
-                    {n.archivada ? <MdUnarchive /> : <MdArchive />}
+                    {n.archivada ? (
+                      <FaBoxOpen className="text-purple-700" />
+                    ) : (
+                      <FaBoxArchive className="text-purple-700" />
+                    )}
                   </button>
                 </div>
               </div>
 
-              {/* Contenido + chips ocupan el espacio flexible */}
-              <div className="mt-2 flex-1">
-                <p className="text-[15px] leading-6 text-gray-900 dark:text-gray-100 whitespace-pre-wrap">
-                  {n.contenido}
-                </p>
+              {/* Contenido */}
+              <p className="mt-2 text-[15px] leading-6 text-gray-900 dark:text-gray-100 whitespace-pre-wrap">
+                {n.contenido}
+              </p>
 
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {(n.contactos || []).map((c) => (
-                    <span
-                      key={`c-${n.id}-${c.id}`}
-                      className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full
-                                 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-100"
-                    >
-                      <span>👤</span>
-                      {c.nombre}
-                    </span>
-                  ))}
-                </div>
+              {/* Chips de contactos */}
+              <div className="mt-3 flex flex-wrap gap-2">
+                {(n.contactos || []).map((c) => (
+                  <span
+                    key={`c-${n.id}-${c.id}`}
+                    className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full
+                               bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-100"
+                  >
+                    <span>👤</span>
+                    {c.nombre}
+                  </span>
+                ))}
               </div>
 
-              {/* Acciones SIEMPRE abajo a la derecha */}
-              <div className="mt-auto pt-3 flex justify-end gap-2 border-t border-black/10">
+              {/* Acciones */}
+              <div className="mt-3 flex justify-end gap-2">
                 <button
                   onClick={() => abrirEditar(n)}
                   className="px-3 py-1 text-xs rounded-lg bg-amber-500 text-white hover:bg-amber-600 active:bg-amber-700 transition-colors"
@@ -469,71 +436,51 @@ const Notas = () => {
                 />
               </div>
 
-              {/* Colores + Checkboxes en una sola fila */}
-              <div className="md:col-span-2 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                {/* Colores */}
-                <div>
-                  <label className="block text-xs font-medium mb-1 text-gray-700 dark:text-gray-300">
-                    Color
-                  </label>
-                  <div className="flex gap-2 flex-wrap">
-                    {COLORS.map((c) => (
-                      <button
-                        key={c.key}
-                        type="button"
-                        onClick={() => setForm((s) => ({ ...s, color: c.key }))}
-                        className={`w-8 h-8 rounded-full border ${c.bg} ${
-                          form.color === c.key ? `ring-2 ${c.ring}` : ""
-                        }`}
-                        title={c.key}
-                      />
-                    ))}
-                  </div>
-                </div>
-
-                {/* Checkboxes */}
-                <div className="flex items-center gap-6">
-                  <label className="inline-flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={!!form.fijada}
-                      onChange={(e) =>
-                        setForm((s) => ({ ...s, fijada: e.target.checked ? 1 : 0 }))
-                      }
+              {/* Color */}
+              <div>
+                <label className="block text-xs font-medium mb-1 text-gray-700 dark:text-gray-300">
+                  Color
+                </label>
+                <div className="flex gap-2 flex-wrap">
+                  {COLORS.map((c) => (
+                    <button
+                      key={c.key}
+                      type="button"
+                      onClick={() => setForm((s) => ({ ...s, color: c.key }))}
+                      className={`w-8 h-8 rounded-full border ${c.bg} ${
+                        form.color === c.key ? `ring-2 ${c.ring}` : ""
+                      }`}
+                      title={c.key}
                     />
-                    <span>Fijar</span>
-                  </label>
-
-                  <label className="inline-flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={!!form.archivada}
-                      onChange={(e) =>
-                        setForm((s) => ({ ...s, archivada: e.target.checked ? 1 : 0 }))
-                      }
-                    />
-                    <span>Archivar</span>
-                  </label>
-
-                  <label className="inline-flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={incluirContactos}
-                      onChange={(e) => handleToggleIncluirContactos(e.target.checked)}
-                    />
-                    <span>Vincular contactos</span>
-                  </label>
+                  ))}
                 </div>
               </div>
 
-              {/* Aviso en edición si apagaste contactos y la nota tenía vínculos */}
-              {modoEdicion && !incluirContactos && form.contactosIds.length > 0 && (
-                <p className="md:col-span-2 -mt-2 text-xs text-red-600">
-                  Al guardar se eliminarán los contactos vinculados a esta nota.
-                </p>
-              )}
+              {/* Fijar / Archivar */}
+              <div className="flex items-center gap-6">
+                <label className="inline-flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={!!form.fijada}
+                    onChange={(e) =>
+                      setForm((s) => ({ ...s, fijada: e.target.checked ? 1 : 0 }))
+                    }
+                  />
+                  <span>Fijar</span>
+                </label>
+                <label className="inline-flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={!!form.archivada}
+                    onChange={(e) =>
+                      setForm((s) => ({ ...s, archivada: e.target.checked ? 1 : 0 }))
+                    }
+                  />
+                  <span>Archivar</span>
+                </label>
+              </div>
 
-              {/* Fila compacta: Recordatorio (izq) + Contactos (der) */}
+              {/* Recordatorio */}
               <div>
                 <label className="block text-xs font-medium mb-1 text-gray-700 dark:text-gray-300">
                   Recordatorio (fecha y hora)
@@ -548,34 +495,30 @@ const Notas = () => {
                 />
               </div>
 
-              {/* Select de contactos (mismo nivel que recordatorio, a la derecha) */}
+              {/* Contactos (multi) */}
               <div>
-                {incluirContactos && (
-                  <>
-                    <label className="block text-xs font-medium mb-1 text-gray-700 dark:text-gray-300">
-                      Seleccionar contactos
-                    </label>
-                    <select
-                      multiple
-                      value={form.contactosIds.map(String)}
-                      onChange={(e) =>
-                        setForm((s) => ({
-                          ...s,
-                          contactosIds: Array.from(e.target.selectedOptions).map((o) =>
-                            Number(o.value)
-                          ),
-                        }))
-                      }
-                      className="w-full px-2 py-2 rounded border text-sm dark:bg-gray-800 dark:text-white border-gray-300 dark:border-gray-700 h-28"
-                    >
-                      {contactos.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.nombre}
-                        </option>
-                      ))}
-                    </select>
-                  </>
-                )}
+                <label className="block text-xs font-medium mb-1 text-gray-700 dark:text-gray-300">
+                  Vincular contactos (opcional)
+                </label>
+                <select
+                  multiple
+                  value={form.contactosIds.map(String)}
+                  onChange={(e) =>
+                    setForm((s) => ({
+                      ...s,
+                      contactosIds: Array.from(e.target.selectedOptions).map((o) =>
+                        Number(o.value)
+                      ),
+                    }))
+                  }
+                  className="w-full px-2 py-2 rounded border text-sm dark:bg-gray-800 dark:text-white border-gray-300 dark:border-gray-700 h-28"
+                >
+                  {contactos.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.nombre}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 

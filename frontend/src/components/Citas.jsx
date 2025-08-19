@@ -1,9 +1,11 @@
-// Citas.jsx — Tabs por estado, validaciones de fecha/hora, parpadeo SIEMPRE en Activo
-
+// Citas.jsx — mismos estilos de botones que Notas (solo UI)
 import React, { useEffect, useRef, useState } from 'react';
 
 const tiposPredef = ['Reunión', 'Llamada', 'Médico', 'Personal', 'Otro'];
 const TABS = ['Pendientes', 'Archivados', 'Cancelados'];
+
+/* ===== helper de sesión: todas las peticiones con cookies ===== */
+const withCreds = (url, opts = {}) => fetch(url, { credentials: 'include', ...opts });
 
 // ======= Persistencia mínima (local) =======
 const STORAGE_KEY = 'citasNotifState';
@@ -24,24 +26,6 @@ const formatHora = (dt) => new Date(dt).toLocaleTimeString('es-BO', { hour: '2-d
 
 // Convierte fecha+hora a ms (validación)
 const fechaHoraMs = (fecha, hora) => { if (!fecha || !hora) return NaN; return new Date(`${fecha}T${hora}:00`).getTime(); };
-
-// Notificación robusta (Service Worker + Notification API fallback)
-const notify = async (title, options = {}) => {
-  try {
-    if ('serviceWorker' in navigator) {
-      const reg = await navigator.serviceWorker.ready;
-      await reg.showNotification(title, options);
-      return true;
-    }
-  } catch {}
-  try {
-    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-      new Notification(title, options);
-      return true;
-    }
-  } catch {}
-  return false;
-};
 
 const estadosForTab = (tab) => {
   if (tab === 'Archivados') return ['Archivado'];
@@ -73,14 +57,13 @@ const Citas = () => {
 
   const [notifState, setNotifState] = useState({});
   const [muted, setMuted] = useState({});
-  const [ahoraMs, setAhoraMs] = useState(Date.now());
-  const activacionesRef = useRef(new Set()); // para no repetir Activar
+  const activacionesRef = useRef(new Set());
 
-  // Toast
+  // Toast simple
   const [toast, setToast] = useState(null);
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 4000); };
 
-  // Audio (desbloqueo)
+  // Audio
   const bellRef = useRef(null);
   const [audioReady, setAudioReady] = useState(false);
   useEffect(() => {
@@ -96,16 +79,16 @@ const Citas = () => {
     return () => { window.removeEventListener('click', unlock); window.removeEventListener('keydown', unlock); };
   }, [audioReady]);
 
-  // Heartbeat para UI
-  useEffect(() => { const id = setInterval(() => setAhoraMs(Date.now()), 30000); return () => clearInterval(id); }, []);
-
   // Datos
   const cargarContactos = () => {
-    fetch('http://localhost:3000/api/contactos').then(r => r.json()).then(setContactos).catch(console.error);
+    withCreds('http://localhost:3000/api/contactos')
+      .then(r => r.json())
+      .then(setContactos)
+      .catch(console.error);
   };
   const cargarCitas = () => {
     const estados = estadosForTab(tab).join(',');
-    fetch(`http://localhost:3000/api/citas?estado=${encodeURIComponent(estados)}`)
+    withCreds(`http://localhost:3000/api/citas?estado=${encodeURIComponent(estados)}`)
       .then(r => r.json())
       .then(arr => {
         setCitas(arr);
@@ -125,10 +108,9 @@ const Citas = () => {
     }
   }, []);
 
-  // Persistencia
+  // Estado local persistente
+  useEffect(() => { setNotifState(loadNotifState()); setMuted(loadMuted()); }, []);
   useEffect(() => {
-    setNotifState(loadNotifState());
-    setMuted(loadMuted());
     const onStorage = (e) => {
       if (e.key === STORAGE_KEY) setNotifState(loadNotifState());
       if (e.key === MUTED_KEY) setMuted(loadMuted());
@@ -136,19 +118,6 @@ const Citas = () => {
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
   }, []);
-
-  // Refrescar al volver a la pestaña (evita UI desfasada)
-  useEffect(() => {
-    const onVis = () => {
-      if (document.visibilityState === 'visible') {
-        cargarCitas();
-        setNotifState(loadNotifState());
-        setMuted(loadMuted());
-      }
-    };
-    document.addEventListener('visibilitychange', onVis);
-    return () => document.removeEventListener('visibilitychange', onVis);
-  }, []); // una vez
 
   // Inicializa programación local por cita
   useEffect(() => {
@@ -215,7 +184,7 @@ const Citas = () => {
   // Cambiar estado en backend
   const cambiarEstado = async (id, estado) => {
     try {
-      await fetch(`http://localhost:3000/api/citas/${id}/estado`, {
+      await withCreds(`http://localhost:3000/api/citas/${id}/estado`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ estado })
@@ -227,7 +196,7 @@ const Citas = () => {
     }
   };
 
-  // Ticker de disparo (10s): notifica + auto-activar al entrar a ventana
+  // Ticker de disparo (10s) — muestra toast y suena
   useEffect(() => {
     const tick = async () => {
       const now = Date.now();
@@ -240,7 +209,7 @@ const Citas = () => {
         const entry = nextState[c.id];
         if (!entry) continue;
 
-        // Auto-activar cuando entra a ventana si estaba Pendiente
+        // Auto-activar al entrar a ventana si estaba en Pendiente
         try {
           const citaMs = new Date(`${c.fecha}T${c.hora}:00`).getTime();
           const aviso = Number.isFinite(+c.aviso_anticipado_min) ? +c.aviso_anticipado_min : 0;
@@ -254,46 +223,46 @@ const Citas = () => {
         } catch {}
 
         if (mutedMap[c.id]) continue;
-
         const rep = (c.recordatorio_cada_min ? +c.recordatorio_cada_min : 0) || 0;
 
         if (now >= entry.nextAt) {
-          const ok = await notify('⏰ Cita', {
-            body: `${c.descripcion || 'Sin descripción'} • ${c.fecha} ${c.hora}`,
-            icon: '/icono.png',
-            badge: '/icono.png',
-            tag: `cita-${c.id}`,
-            renotify: true
-          });
-
-          if (bellRef.current) {
-            try { bellRef.current.currentTime = 0; await bellRef.current.play(); } catch {}
-          }
-
-          if (!ok || document.visibilityState === 'visible') {
+          try {
+            if ('serviceWorker' in navigator) {
+              const reg = await navigator.serviceWorker.ready;
+              await reg.showNotification('⏰ Cita', {
+                body: `${c.descripcion || 'Sin descripción'} • ${c.fecha} ${c.hora}`,
+                icon: '/icono.png',
+                badge: '/icono.png',
+                tag: `cita-${c.id}`,
+                renotify: true
+              });
+            } else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+              new Notification('⏰ Cita', {
+                body: `${c.descripcion || 'Sin descripción'} • ${c.fecha} ${c.hora}`,
+                icon: '/icono.png',
+                tag: `cita-${c.id}`,
+                renotify: true
+              });
+            }
+          } catch {}
+          if (bellRef.current) { try { bellRef.current.currentTime = 0; await bellRef.current.play(); } catch {} }
+          if (document.visibilityState === 'visible') {
             showToast(`⏰ Cita: ${c.descripcion || 'Sin descripción'} • ${c.fecha} ${c.hora}`);
           }
 
-          // Reprogramar
-          if (entry.mode === 'single0') {
-            entry.nextAt = Infinity;
-          } else if (entry.mode === 'two-step') {
+          if (entry.mode === 'single0') entry.nextAt = Infinity;
+          else if (entry.mode === 'two-step') {
             if ((entry.step ?? 1) === 1) { entry.step = 2; entry.nextAt = entry.citaAt; }
             else { entry.step = 3; entry.nextAt = Infinity; }
           } else {
             entry.nextAt = rep > 0 ? now + rep * 60 * 1000 : Infinity;
           }
-
           entry.last = now;
           changed = true;
         }
       }
 
-      if (changed) {
-        setNotifState(nextState);
-        saveNotifState(nextState);
-      }
-      setAhoraMs(now);
+      if (changed) { setNotifState(nextState); saveNotifState(nextState); }
     };
 
     const id = setInterval(() => { tick(); }, 10000);
@@ -343,77 +312,63 @@ const Citas = () => {
   };
 
   const guardarCita = async () => {
-    try {
-      // Validación: fecha/hora futuras
-      const ms = fechaHoraMs(nuevaCita.fecha, nuevaCita.hora);
-      if (!Number.isFinite(ms) || ms < Date.now()) {
-        alert('La fecha y hora no pueden ser anteriores al momento actual.');
-        return;
-      }
-
-      const body = {
-        ...nuevaCita,
-        aviso_anticipado_min: +nuevaCita.aviso_anticipado_min || 0,
-        recordatorio_cada_min: +nuevaCita.recordatorio_cada_min || 0,
-      };
-
-      // Regla: si es edición, vuelve a Pendiente
-      if (modoEdicion) body.estado = 'Pendiente';
-
-      const method = modoEdicion ? 'PUT' : 'POST';
-      const endpoint = modoEdicion
-        ? `http://localhost:3000/api/citas/${citaEditandoId}`
-        : 'http://localhost:3000/api/citas';
-
-      await fetch(endpoint, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-
-      // Limpiar programación/mute locales si era edición
-      if (modoEdicion && citaEditandoId) {
-        setNotifState(prev => { const n = { ...prev }; delete n[citaEditandoId]; saveNotifState(n); return n; });
-        setMuted(prev => { const m = { ...prev }; delete m[citaEditandoId]; saveMuted(m); return m; });
-      }
-
-      setMostrarModal(false);
-      setModoEdicion(false);
-      setCitaEditandoId(null);
-      cargarCitas();
-    } catch (e) {
-      console.error('Error al guardar cita:', e);
-      alert('No se pudo guardar la cita.');
+    // Validación: fecha/hora futuras
+    const ms = fechaHoraMs(nuevaCita.fecha, nuevaCita.hora);
+    if (!Number.isFinite(ms) || ms < Date.now()) {
+      alert('La fecha y hora no pueden ser anteriores al momento actual.');
+      return;
     }
+    const body = {
+      ...nuevaCita,
+      aviso_anticipado_min: +nuevaCita.aviso_anticipado_min || 0,
+      recordatorio_cada_min: +nuevaCita.recordatorio_cada_min || 0,
+    };
+    if (modoEdicion) body.estado = 'Pendiente';
+
+    const method = modoEdicion ? 'PUT' : 'POST';
+    const endpoint = modoEdicion
+      ? `http://localhost:3000/api/citas/${citaEditandoId}`
+      : 'http://localhost:3000/api/citas';
+
+    await withCreds(endpoint, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+    // Limpiar programación/mute locales si era edición
+    if (modoEdicion && citaEditandoId) {
+      setNotifState(prev => { const n = { ...prev }; delete n[citaEditandoId]; saveNotifState(n); return n; });
+      setMuted(prev => { const m = { ...prev }; delete m[citaEditandoId]; saveMuted(m); return m; });
+    }
+
+    setMostrarModal(false);
+    setModoEdicion(false);
+    setCitaEditandoId(null);
+    cargarCitas();
   };
 
   const borrarCita = async (id) => {
     if (!window.confirm('¿Seguro que deseas eliminar esta cita?')) return;
-    try {
-      await fetch(`http://localhost:3000/api/citas/${id}`, { method: 'DELETE' });
-      setNotifState(prev => { const n = { ...prev }; delete n[id]; saveNotifState(n); return n; });
-      setMuted(prev => { const m = { ...prev }; delete m[id]; saveMuted(m); return m; });
-      cargarCitas();
-    } catch (e) { console.error('Error al eliminar cita:', e); alert('No se pudo eliminar la cita.'); }
+    await withCreds(`http://localhost:3000/api/citas/${id}`, { method: 'DELETE' });
+    setNotifState(prev => { const n = { ...prev }; delete n[id]; saveNotifState(n); return n; });
+    setMuted(prev => { const m = { ...prev }; delete m[id]; saveMuted(m); return m; });
+    cargarCitas();
   };
 
   // ======= UI =======
   return (
     <div className="px-2 py-2">
-      {/* Audio */}
       <audio ref={bellRef} src="/sonido-alerta.mp3" preload="auto" />
-
-      {/* Toast */}
       {toast && (
         <div className="fixed top-4 right-4 z-[9999] bg-black text-white px-4 py-3 rounded shadow-lg">
           {toast}
         </div>
       )}
 
-      {/* Encabezado + tabs al lado del título + búsqueda */}
+      {/* Encabezado */}
       <div className="mb-3">
         <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
-          {/* Izquierda: título + tabs en la misma línea */}
           <div className="flex-1 flex flex-wrap items-center gap-4">
             <h2 className="text-2xl font-bold text-gray-800 dark:text-white">📅 Citas</h2>
 
@@ -424,10 +379,10 @@ const Citas = () => {
                   <button
                     key={t}
                     onClick={() => setTab(t)}
-                    className={`px-3 py-1 rounded-full text-sm border
+                    className={`px-3 py-1.5 rounded-full text-sm border transition-colors
                       ${active
-                        ? 'bg-blue-600 text-white border-blue-600'
-                        : 'bg-transparent text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                        : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
                   >
                     {t}
                   </button>
@@ -436,16 +391,21 @@ const Citas = () => {
             </div>
           </div>
 
-          {/* Derecha: buscador + botón nueva cita */}
           <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
             <input
               type="text"
               placeholder="🔍 Buscar (contacto, lugar, tipo, descripción)"
               value={busqueda}
               onChange={(e) => setBusqueda(e.target.value)}
-              className="w-full sm:w-80 px-3 py-2 border rounded dark:bg-gray-800 dark:text-white border-gray-300 dark:border-gray-700"
+              className="w-full sm:w-80 px-3 py-2 rounded-xl border border-gray-300 dark:border-gray-700
+                         bg-white dark:bg-gray-900 text-gray-900 dark:text-white
+                         focus:outline-none focus:ring-2 focus:ring-blue-400"
             />
-            <button onClick={abrirNuevo} className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+            <button
+              onClick={abrirNuevo}
+              className="px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-800
+                         transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+            >
               ➕ Nueva cita
             </button>
           </div>
@@ -465,15 +425,14 @@ const Citas = () => {
             );
           })
           .map(c => {
-            // 🔴 AHORA el UI de "activa" depende SOLO del ESTADO
             const activa = c.estado === 'Activo';
             const dt = new Date(`${c.fecha}T${c.hora}:00`);
 
             return (
               <div
                 key={c.id}
-                className={`relative p-4 rounded-xl border shadow-sm h-full flex flex-col
-                  bg-gray-200 dark:bg-gray-800 border-gray-200 dark:border-gray-700
+                className={`relative h-full flex flex-col p-4 rounded-2xl shadow-sm ring-1 ring-inset ring-black/5
+                  bg-gray-200 dark:bg-gray-800 border border-transparent
                   ${activa ? 'animate-pulse ring-2 ring-amber-400 dark:ring-amber-300' : ''}`}
               >
                 {/* Cabecera */}
@@ -482,7 +441,7 @@ const Citas = () => {
                     <h3 className="font-semibold text-base text-gray-800 dark:text-gray-100">
                       {nombreContacto(c.contacto_id)}
                     </h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-300">
+                    <p className="text-sm text-gray-700 dark:text-gray-300">
                       📅 {formatFecha(dt)} — ⏰ {formatHora(dt)}
                     </p>
                   </div>
@@ -490,19 +449,6 @@ const Citas = () => {
                     {c.tipo || '—'}
                   </span>
                 </div>
-
-                {/* Botón Parar: SIEMPRE que esté Activo */}
-                {c.estado === 'Activo' && (
-                  <button
-                    onClick={() => pararAviso(c.id)}
-                    aria-label="Parar avisos"
-                    className="absolute right-4 top-14 w-12 h-12 grid place-items-center rounded-xl
-                      bg-gray-700 hover:bg-gray-600 text-white dark:bg-gray-600 dark:hover:bg-gray-500 text-xl shadow"
-                    title="Detener recordatorios (archivar)"
-                  >
-                    🔕
-                  </button>
-                )}
 
                 {/* Lugar y descripción */}
                 {(c.lugar || c.descripcion) && (
@@ -512,7 +458,7 @@ const Citas = () => {
                   </div>
                 )}
 
-                {/* Línea de aviso/recordatorio + estado */}
+                {/* Línea info + estado */}
                 <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                   {c.aviso_anticipado_min === 0 ? 'Sin anticipación' : `Notificar ${formatMin(c.aviso_anticipado_min)} antes`}
                   {formatRepetir(c.recordatorio_cada_min)}
@@ -521,25 +467,36 @@ const Citas = () => {
                   </span>
                 </div>
 
-                {/* Acciones */}
-                <div className="mt-auto flex justify-end gap-2 pt-2">
+                {/* Acciones (igual que Notas: abajo a la derecha) */}
+                <div className="mt-auto pt-3 flex justify-end gap-2 border-t border-black/10">
                   {(c.estado === 'Pendiente' || c.estado === 'Activo') && (
                     <button
                       onClick={() => cambiarEstado(c.id, 'Cancelado')}
-                      className="px-3 py-1 text-xs bg-gray-500 hover:bg-gray-600 text-white rounded"
+                      className="px-3 py-1 text-xs rounded-lg bg-gray-500 text-white hover:bg-gray-600 active:bg-gray-700 transition-colors"
                     >
                       Cancelar
                     </button>
                   )}
+
+                  {c.estado === 'Activo' && (
+                    <button
+                      onClick={() => pararAviso(c.id)}
+                      className="px-3 py-1 text-xs rounded-lg bg-purple-600 text-white hover:bg-purple-700 active:bg-purple-800 transition-colors"
+                      title="Detener recordatorios (archivar)"
+                    >
+                      Parar avisos
+                    </button>
+                  )}
+
                   <button
                     onClick={() => abrirEditar(c)}
-                    className="px-3 py-1 text-xs bg-yellow-500 hover:bg-yellow-600 text-white rounded"
+                    className="px-3 py-1 text-xs rounded-lg bg-amber-500 text-white hover:bg-amber-600 active:bg-amber-700 transition-colors"
                   >
                     Editar
                   </button>
                   <button
                     onClick={() => borrarCita(c.id)}
-                    className="px-3 py-1 text-xs bg-red-600 hover:bg-red-700 text-white rounded"
+                    className="px-3 py-1 text-xs rounded-lg bg-red-600 text-white hover:bg-red-700 active:bg-red-800 transition-colors"
                   >
                     Eliminar
                   </button>
@@ -552,8 +509,10 @@ const Citas = () => {
       {/* Modal */}
       {mostrarModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-900 text-gray-900 dark:text-white rounded p-5 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <h3 className="text-lg font-bold mb-3 text-center">
+          <div className="bg-white dark:bg-gray-900 text-gray-900 dark:text-white
+                          rounded-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto
+                          shadow-xl ring-1 ring-black/10">
+            <h3 className="text-xl font-bold mb-4 text-center">
               {modoEdicion ? '✏️ Editar cita' : '➕ Nueva cita'}
             </h3>
 
@@ -566,7 +525,7 @@ const Citas = () => {
                   value={nuevaCita.contacto_id}
                   onChange={(e) => setNuevaCita({ ...nuevaCita, contacto_id: e.target.value })}
                   required
-                  className={`w-full px-2 py-2 rounded border text-sm focus:outline-none focus:ring-2
+                  className={`w-full px-2 py-2 rounded-xl border text-sm focus:outline-none focus:ring-2
                     ${!nuevaCita.contacto_id ? 'border-red-500 focus:ring-red-400' : 'border-gray-300 dark:border-gray-700 focus:ring-blue-500'}
                     bg-white text-black dark:bg-gray-800 dark:text-white`}
                 >
@@ -585,7 +544,7 @@ const Citas = () => {
                   value={nuevaCita.fecha}
                   onChange={(e) => setNuevaCita({ ...nuevaCita, fecha: e.target.value })}
                   required
-                  className={`w-full px-2 py-2 rounded border text-sm focus:outline-none focus:ring-2
+                  className={`w-full px-2 py-2 rounded-xl border text-sm focus:outline-none focus:ring-2
                     ${!nuevaCita.fecha ? 'border-red-500 focus:ring-red-400' : 'border-gray-300 dark:border-gray-700 focus:ring-blue-500'}
                     dark:bg-gray-800 dark:text-white`}
                 />
@@ -599,7 +558,7 @@ const Citas = () => {
                   value={nuevaCita.hora}
                   onChange={(e) => setNuevaCita({ ...nuevaCita, hora: e.target.value })}
                   required
-                  className={`w-full px-2 py-2 rounded border text-sm focus:outline-none focus:ring-2
+                  className={`w-full px-2 py-2 rounded-xl border text-sm focus:outline-none focus:ring-2
                     ${!nuevaCita.hora ? 'border-red-500 focus:ring-red-400' : 'border-gray-300 dark:border-gray-700 focus:ring-blue-500'}
                     dark:bg-gray-800 dark:text-white`}
                 />
@@ -611,7 +570,7 @@ const Citas = () => {
                 <select
                   value={nuevaCita.tipo}
                   onChange={(e) => setNuevaCita({ ...nuevaCita, tipo: e.target.value })}
-                  className="w-full px-2 py-2 rounded border text-sm border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                  className="w-full px-2 py-2 rounded-xl border text-sm border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
                 >
                   <option value="">(Sin tipo)</option>
                   {tiposPredef.map(t => <option key={t} value={t}>{t}</option>)}
@@ -625,7 +584,7 @@ const Citas = () => {
                   type="text"
                   value={nuevaCita.lugar}
                   onChange={(e) => setNuevaCita({ ...nuevaCita, lugar: e.target.value })}
-                  className="w-full px-2 py-2 rounded border text-sm border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                  className="w-full px-2 py-2 rounded-xl border text-sm border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
                 />
               </div>
 
@@ -636,7 +595,7 @@ const Citas = () => {
                   value={nuevaCita.descripcion}
                   onChange={(e) => setNuevaCita({ ...nuevaCita, descripcion: e.target.value })}
                   rows={3}
-                  className="w-full px-2 py-2 rounded border text-sm border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                  className="w-full px-2 py-2 rounded-xl border text-sm border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
                 />
               </div>
 
@@ -644,7 +603,7 @@ const Citas = () => {
               <select
                 value={nuevaCita.aviso_anticipado_min}
                 onChange={(e) => setNuevaCita({ ...nuevaCita, aviso_anticipado_min: +e.target.value })}
-                className="w-full px-2 py-2 rounded border text-sm border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                className="w-full px-2 py-2 rounded-xl border text-sm border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
               >
                 <option value={0}>Sin anticipación</option>
                 {[5,10,15,20,30,45,60,120].map(v => (
@@ -656,7 +615,7 @@ const Citas = () => {
               <select
                 value={nuevaCita.recordatorio_cada_min}
                 onChange={(e) => setNuevaCita({ ...nuevaCita, recordatorio_cada_min: +e.target.value })}
-                className="w-full px-2 py-2 rounded border text-sm border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                className="w-full px-2 py-2 rounded-xl border text-sm border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
               >
                 <option value={0}>Sin repetición</option>
                 {[5,10,15,20,30,45,60,120].map(v => (
@@ -665,18 +624,21 @@ const Citas = () => {
               </select>
             </div>
 
-            {/* Botones */}
-            <div className="flex justify-end gap-2 mt-4">
+            {/* Botones modal al estilo Notas */}
+            <div className="mt-4 flex justify-end gap-3">
               <button
                 onClick={() => { setMostrarModal(false); setModoEdicion(false); setCitaEditandoId(null); }}
-                className="px-4 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm"
+                className="px-4 py-1 rounded-xl bg-gray-600 text-white hover:bg-gray-700
+                           focus:outline-none focus:ring-2 focus:ring-gray-400 text-sm"
               >
                 Cancelar
               </button>
               <button
                 onClick={guardarCita}
                 disabled={!nuevaCita.contacto_id || !nuevaCita.fecha || !nuevaCita.hora}
-                className="px-4 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-4 py-1 rounded-xl bg-green-600 text-white hover:bg-green-700
+                           focus:outline-none focus:ring-2 focus:ring-green-400 text-sm
+                           disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {modoEdicion ? 'Guardar cambios' : 'Guardar'}
               </button>

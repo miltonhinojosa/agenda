@@ -3,10 +3,10 @@ const express = require('express');
 const ruta = express.Router();
 const db = require('../db/conexion');
 
-// Utilidad para construir el link de WhatsApp desde código de país y celular
+// Función para armar enlace de WhatsApp
 function buildWhatsappLink(codigo_pais, celular) {
-  const cod = (codigo_pais || '+591').replace(/\D/g, ''); // "+591" -> "591"
-  const num = (celular || '').replace(/\D/g, '');         // "700-11-222" -> "70011222"
+  const cod = (codigo_pais || '+591').replace(/\D/g, '');
+  const num = (celular || '').replace(/\D/g, '');
   if (!cod || !num) return null;
   return `https://wa.me/${cod}${num}`;
 }
@@ -15,7 +15,7 @@ function buildWhatsappLink(codigo_pais, celular) {
 
 // Obtener todos los contactos
 ruta.get('/', (req, res) => {
-  const consulta = 'SELECT * FROM contactos';
+  const consulta = 'SELECT * FROM contactos ORDER BY favorito DESC, nombre ASC';
   db.all(consulta, [], (error, filas) => {
     if (error) {
       console.error('❌ Error al obtener contactos:', error.message);
@@ -25,7 +25,7 @@ ruta.get('/', (req, res) => {
   });
 });
 
-// (Opcional) Obtener un contacto por ID
+// Obtener un contacto por ID
 ruta.get('/:id', (req, res) => {
   const { id } = req.params;
   const sql = 'SELECT * FROM contactos WHERE id = ?';
@@ -47,12 +47,14 @@ ruta.post('/', (req, res) => {
     celular,
     direccion,
     email,
-    facebook,
+    instagram,
+    tiktok,
     fecha_nacimiento,
     empresa,
     grupo_id,
     foto_url,
-    codigo_pais, // 👈 lo usamos para armar el link
+    codigo_pais,
+    favorito
   } = req.body;
 
   const whatsapp = buildWhatsappLink(codigo_pais, celular);
@@ -60,15 +62,15 @@ ruta.post('/', (req, res) => {
   const consulta = `
     INSERT INTO contactos (
       nombre, telefono_fijo, celular, whatsapp, direccion,
-      email, facebook, fecha_nacimiento, empresa,
-      grupo_id, foto_url
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      email, instagram, tiktok, fecha_nacimiento, empresa,
+      grupo_id, foto_url, favorito
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `;
 
   const valores = [
     nombre, telefono_fijo, celular, whatsapp, direccion,
-    email, facebook, fecha_nacimiento, empresa,
-    grupo_id, foto_url
+    email, instagram, tiktok, fecha_nacimiento, empresa,
+    grupo_id, foto_url, favorito ? 1 : 0
   ];
 
   db.run(consulta, valores, function (error) {
@@ -89,12 +91,14 @@ ruta.put('/:id', (req, res) => {
     celular,
     direccion,
     email,
-    facebook,
+    instagram,
+    tiktok,
     fecha_nacimiento,
     empresa,
     grupo_id,
     foto_url,
-    codigo_pais // 👈 recalculamos el link con lo que venga del form
+    codigo_pais,
+    favorito
   } = req.body;
 
   const whatsapp = buildWhatsappLink(codigo_pais, celular);
@@ -107,18 +111,20 @@ ruta.put('/:id', (req, res) => {
            whatsapp = ?,
            direccion = ?,
            email = ?,
-           facebook = ?,
+           instagram = ?,
+           tiktok = ?,
            fecha_nacimiento = ?,
            empresa = ?,
            grupo_id = ?,
-           foto_url = ?
+           foto_url = ?,
+           favorito = ?
      WHERE id = ?
   `;
 
   const valores = [
     nombre, telefono_fijo, celular, whatsapp, direccion,
-    email, facebook, fecha_nacimiento, empresa,
-    grupo_id, foto_url, id
+    email, instagram, tiktok, fecha_nacimiento, empresa,
+    grupo_id, foto_url, favorito ? 1 : 0, id
   ];
 
   db.run(sql, valores, function (err) {
@@ -130,6 +136,24 @@ ruta.put('/:id', (req, res) => {
       return res.status(404).json({ mensaje: 'Contacto no encontrado' });
     }
     res.json({ mensaje: 'Contacto actualizado correctamente' });
+  });
+});
+
+// Cambiar solo el valor de favorito
+ruta.patch('/:id/favorito', (req, res) => {
+  const { id } = req.params;
+  const { valor } = req.body;
+
+  const sql = 'UPDATE contactos SET favorito = ? WHERE id = ?';
+  db.run(sql, [valor ? 1 : 0, id], function (err) {
+    if (err) {
+      console.error('❌ Error al actualizar favorito:', err.message);
+      return res.status(500).json({ mensaje: 'No se pudo actualizar el favorito' });
+    }
+    if (this.changes === 0) {
+      return res.status(404).json({ mensaje: 'Contacto no encontrado' });
+    }
+    res.json({ mensaje: 'Favorito actualizado correctamente' });
   });
 });
 
@@ -151,3 +175,4 @@ ruta.delete('/:id', (req, res) => {
 });
 
 module.exports = ruta;
+
