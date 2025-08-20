@@ -11,6 +11,8 @@ const COLORS = [
   { key: "rose",    bg: "bg-rose-200 dark:bg-rose-800", ring: "ring-rose-400" },
 ];
 
+const CUMPLE_CAT = "Cumpleaños";
+
 const isEmpty = (v) => v == null || String(v).trim() === "";
 const fmtDateTime = (s) => (s ? new Date(s).toLocaleString() : "");
 const colorToTailwind = (key) => COLORS.find(c => c.key === key)?.bg || "bg-gray-200 dark:bg-gray-800";
@@ -29,7 +31,7 @@ const Eventos = () => {
   const [eventos, setEventos] = useState([]);
   const [cargando, setCargando] = useState(false);
 
-  const [tab, setTab] = useState("Activo"); // Activo | Archivado | Cancelado | Todos
+  const [tab, setTab] = useState("Activo"); // Activo | Archivado | Cancelado | Todos | Cumpleaños
   const [busqueda, setBusqueda] = useState("");
 
   const [mostrarModal, setMostrarModal] = useState(false);
@@ -64,7 +66,9 @@ const Eventos = () => {
   const cargarEventos = async () => {
     setCargando(true);
     try {
-      const params = new URLSearchParams({ estado: tab });
+      // Para la pestaña "Cumpleaños" pedimos Todos y filtramos en front (así no tocamos el backend)
+      const estadoParam = ["Activo","Archivado","Cancelado","Todos"].includes(tab) ? tab : "Todos";
+      const params = new URLSearchParams({ estado: estadoParam });
       const r = await fetch(`${API}/eventos?${params.toString()}`, { credentials: "include" });
       const data = await r.json();
       setEventos(Array.isArray(data) ? data : []);
@@ -80,19 +84,27 @@ const Eventos = () => {
   // ==== Filtro y orden ====
   const filtrados = useMemo(() => {
     const t = busqueda.toLowerCase();
-    return eventos
+    let base = eventos
       .filter((e) =>
         (e.titulo || "").toLowerCase().includes(t) ||
         (e.descripcion || "").toLowerCase().includes(t) ||
         (e.ubicacion || "").toLowerCase().includes(t) ||
         (e.categoria || "").toLowerCase().includes(t)
-      )
-      .sort((a, b) => {
-        const da = a.inicio ? new Date(a.inicio).getTime() : Infinity;
-        const db = b.inicio ? new Date(b.inicio).getTime() : Infinity;
-        return da - db;
-      });
-  }, [eventos, busqueda]);
+      );
+
+    // 🔒 Cumpleaños: mostrar SOLO en su pestaña y excluir de las demás
+    if (tab === "Cumpleaños") {
+      base = base.filter((e) => (e.categoria || "") === CUMPLE_CAT);
+    } else {
+      base = base.filter((e) => (e.categoria || "") !== CUMPLE_CAT);
+    }
+
+    return base.sort((a, b) => {
+      const da = a.inicio ? new Date(a.inicio).getTime() : Infinity;
+      const db = b.inicio ? new Date(b.inicio).getTime() : Infinity;
+      return da - db;
+    });
+  }, [eventos, busqueda, tab]);
 
   // ==== Permiso notificaciones ====
   useEffect(() => {
@@ -135,16 +147,14 @@ const Eventos = () => {
 
     eventos.forEach(ev => {
       if (!ev.inicio) return;
-      // Solo consideramos eventos activos para notificar
       if (ev.estado !== 'Activo') return;
 
       const inicioMs = new Date(ev.inicio).getTime();
-      const finMs = ev.fin ? new Date(ev.fin).getTime() : (inicioMs + 2 * 60 * 60 * 1000); // si no hay fin, 2h de ventana
+      const finMs = ev.fin ? new Date(ev.fin).getTime() : (inicioMs + 2 * 60 * 60 * 1000);
       const aviso = Number.isFinite(+ev.aviso_min) ? +ev.aviso_min : 0;
       const rep = (ev.repetir_cada_min ? +ev.repetir_cada_min : 0) || 0;
       const firstAt = firstTriggerMs(inicioMs, aviso);
 
-      // Modos: 'single0' (solo a la hora), 'two-step' (previo + hora), 'repeat' (repetición)
       let mode = 'single0';
       if (rep > 0) mode = 'repeat';
       else if (aviso > 0) mode = 'two-step';
@@ -159,7 +169,7 @@ const Eventos = () => {
           const nextAt = step === 1 ? firstAt : (step === 2 ? inicioMs : Infinity);
           updated[ev.id] = { nextAt, last: null, mode, step: step === 3 ? 2 : step, inicioMs, finMs };
         } else {
-          const base = now <= firstAt ? firstAt : now; // si ya pasó el previo, dispara pronto
+          const base = now <= firstAt ? firstAt : now;
           updated[ev.id] = { nextAt: base, last: null, mode, inicioMs, finMs };
         }
       } else {
@@ -179,13 +189,11 @@ const Eventos = () => {
         }
       }
 
-      // Si ya terminó hace rato, no volver a notificar
       if (now > finMs + 5 * 60 * 1000) {
         updated[ev.id].nextAt = Infinity;
       }
     });
 
-    // Limpia estados de eventos que ya no existen o no están activos
     Object.keys(updated).forEach(idStr => {
       const id = +idStr;
       const ev = eventos.find(x => x.id === id);
@@ -214,7 +222,6 @@ const Eventos = () => {
         const rep = (ev.repetir_cada_min ? +ev.repetir_cada_min : 0) || 0;
 
         if (now >= entry.nextAt && now <= (entry.finMs + 5 * 60 * 1000)) {
-          // Notificar
           try {
             if ('serviceWorker' in navigator) {
               const reg = await navigator.serviceWorker.ready;
@@ -242,16 +249,13 @@ const Eventos = () => {
             showToast(`⏰ ${ev.titulo} • ${fmtDateTime(ev.inicio)}${ev.fin ? ' – ' + fmtDateTime(ev.fin) : ''}`);
           }
 
-          // Siguiente disparo según modo
           if (entry.mode === 'single0') {
             entry.nextAt = Infinity;
           } else if (entry.mode === 'two-step') {
             if ((entry.step ?? 1) === 1) { entry.step = 2; entry.nextAt = entry.inicioMs; }
             else { entry.step = 3; entry.nextAt = Infinity; }
           } else {
-            // repeat
             const next = now + rep * 60 * 1000;
-            // no repetir más allá del fin + 5min
             entry.nextAt = Math.min(next, entry.finMs + 5 * 60 * 1000);
           }
           entry.last = now;
@@ -296,7 +300,6 @@ const Eventos = () => {
       credentials: "include",
     });
 
-    // Si era edición, resetea programación local para ese id
     if (modoEdicion && eventoEditando?.id) {
       setNotifState(prev => { const n = { ...prev }; delete n[eventoEditando.id]; saveJSON(STORAGE_KEY, n); return n; });
       setMuted(prev => { const m = { ...prev }; delete m[eventoEditando.id]; saveJSON(MUTED_KEY, m); return m; });
@@ -323,7 +326,6 @@ const Eventos = () => {
       body: JSON.stringify({ estado }),
       credentials: "include",
     });
-    // Si se archiva/cancela, silencia y corta programación local
     if (estado !== 'Activo') {
       setMuted(prev => { const m = { ...prev, [ev.id]: true }; saveJSON(MUTED_KEY, m); return m; });
       setNotifState(prev => { const n = { ...prev }; if (n[ev.id]) n[ev.id].nextAt = Infinity; saveJSON(STORAGE_KEY, n); return n; });
@@ -332,7 +334,6 @@ const Eventos = () => {
   };
 
   const pararAviso = async (ev) => {
-    // silencia local y archiva
     setMuted(prev => { const m = { ...prev, [ev.id]: true }; saveJSON(MUTED_KEY, m); return m; });
     setNotifState(prev => { const n = { ...prev }; if (!n[ev.id]) n[ev.id] = { nextAt: Infinity }; else n[ev.id].nextAt = Infinity; saveJSON(STORAGE_KEY, n); return n; });
     await cambiarEstado(ev, 'Archivado');
@@ -395,7 +396,7 @@ const Eventos = () => {
             </h2>
 
             <div className="flex gap-2 flex-wrap">
-              {["Activo", "Archivado", "Cancelado", "Todos"].map((t) => (
+              {["Activo", "Archivado", "Cancelado", "Todos", "Cumpleaños"].map((t) => (
                 <button
                   key={t}
                   onClick={() => setTab(t)}

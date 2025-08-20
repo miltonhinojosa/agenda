@@ -1,13 +1,12 @@
 // frontend/src/components/Contactos.jsx
 import React, { useEffect, useMemo, useState } from "react";
-import { FaWhatsapp, FaInstagram, FaEye } from "react-icons/fa";
+import { FaWhatsapp, FaInstagram } from "react-icons/fa";
 import { FaTiktok } from "react-icons/fa6";
 
 const API = "http://localhost:3000/api";
 
 /* ============================================================
    Helper para ENVIAR la cookie de sesión en TODAS las peticiones
-   (único cambio funcional para soportar autenticación)
    ============================================================ */
 const withCreds = (url, opts = {}) => fetch(url, { credentials: "include", ...opts });
 
@@ -19,6 +18,35 @@ const buildWa = (codigo = "+591", cel = "") => {
   return cc && c ? `https://wa.me/${cc}${c}` : "";
 };
 const isEmpty = (v) => v == null || String(v).trim() === "";
+
+// Gmail compose y normalización de redes
+const gmailCompose = (email = "") =>
+  email ? `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}` : "";
+
+const igUrl = (v = "") => {
+  if (!v) return "";
+  return v.startsWith("http")
+    ? v
+    : `https://instagram.com/${String(v).replace(/^@/, "")}`;
+};
+
+const tkUrl = (v = "") => {
+  if (!v) return "";
+  return v.startsWith("http")
+    ? v
+    : `https://www.tiktok.com/@${String(v).replace(/^@/, "")}`;
+};
+
+// ¿Hoy es el cumpleaños?
+const isBirthdayToday = (yyyy_mm_dd = "") => {
+  if (!yyyy_mm_dd) return false;
+  const [Y, M, D] = yyyy_mm_dd.split("-").map(Number);
+  if (!M || !D) return false;
+  const now = new Date();
+  const mm = now.getMonth() + 1;
+  const dd = now.getDate();
+  return mm === M && dd === D;
+};
 
 /* ================= Componente ================= */
 const Contactos = () => {
@@ -204,7 +232,7 @@ const Contactos = () => {
     setMostrarModal(false);
     setModoEdicion(false);
     setContactoEditando(null);
-    cargarContactos();
+    cargarContactos(); // el backend crea/actualiza el evento automáticamente
   };
   const eliminar = async (id) => {
     if (!window.confirm("¿Eliminar este contacto?")) return;
@@ -315,23 +343,16 @@ const Contactos = () => {
         {lista.map((c) => {
           const wa = buildWa(c.codigo_pais, c.celular);
           const esFav = !!c.favorito;
-          const urlIg = c.instagram
-            ? (c.instagram.startsWith("http")
-                ? c.instagram
-                : `https://instagram.com/${String(c.instagram).replace(/^@/, "")}`)
-            : "";
-          const urlTk = c.tiktok
-            ? (c.tiktok.startsWith("http")
-                ? c.tiktok
-                : `https://www.tiktok.com/@${String(c.tiktok).replace(/^@/, "")}`)
-            : "";
+          const urlIg = igUrl(c.instagram || "");
+          const urlTk = tkUrl(c.tiktok || "");
+          const hoyCumple = isBirthdayToday(c.fecha_nacimiento);
 
           return (
             <div
               key={c.id}
               className="flex items-start gap-3 p-3 rounded-2xl bg-gray-200 dark:bg-gray-800 ring-1 ring-black/5 shadow-sm"
             >
-              {/* Columna foto + ojo debajo */}
+              {/* Columna foto + ojo debajo (abre detalle) */}
               <div className="flex flex-col items-center shrink-0">
                 <button
                   onClick={() => {
@@ -357,26 +378,37 @@ const Contactos = () => {
 
               {/* Columna datos + estrella + accesos */}
               <div className="flex-1 min-w-0">
-                {/* Nombre + estrella */}
+                {/* Nombre + estrella (+ 🎂 si hoy) */}
                 <div className="flex items-start justify-between">
                   <h3 className="text-base font-semibold text-gray-800 dark:text-gray-100 truncate">
-                    {c.nombre}
+                    {c.nombre} {hoyCumple ? "🎂" : ""}
                   </h3>
                   <button
                     onClick={() => toggleFavorito(c)}
-                    className={`text-2xl ${
-                      esFav ? "text-yellow-500 hover:text-yellow-600" : "text-gray-400 hover:text-gray-500"
-                    }`}
+                    className={`text-2xl ${esFav ? "text-yellow-500 hover:text-yellow-600" : "text-gray-400 hover:text-gray-500"}`}
                     title={esFav ? "Quitar de favoritos" : "Marcar favorito"}
                   >
                     {esFav ? "★" : "☆"}
                   </button>
                 </div>
 
-                {/* Datos breves (una o dos líneas máximo) */}
+                {/* Datos breves */}
                 <div className="mt-0.5 text-[13px] leading-5 text-gray-900 dark:text-gray-100">
                   <div className="truncate">📱 {c.celular || "—"}</div>
-                  {c.email && <div className="truncate">✉️ {c.email}</div>}
+                  {c.email && (
+                    <div className="truncate">
+                      ✉️{" "}
+                      <a
+                        href={gmailCompose(c.email)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline hover:no-underline"
+                        title="Escribir con Gmail"
+                      >
+                        {c.email}
+                      </a>
+                    </div>
+                  )}
                 </div>
 
                 {/* Accesos rápidos */}
@@ -431,30 +463,111 @@ const Contactos = () => {
 
             <div className="flex flex-col items-center mb-4">
               {contactoDetalle.foto_url ? (
-                <img src={`http://localhost:3000${contactoDetalle.foto_url}`} alt="Foto" className="w-40 h-40 rounded-full object-cover shadow-lg border-4 border-white dark:border-gray-700" />
+                <img
+                  src={`http://localhost:3000${contactoDetalle.foto_url}`}
+                  alt="Foto"
+                  className="w-40 h-40 rounded-full object-cover shadow-lg border-4 border-white dark:border-gray-700"
+                />
               ) : (
-                <div className="w-40 h-40 rounded-full bg-gray-400 flex items-center justify-center text-5xl text-white">👤</div>
+                <div className="w-40 h-40 rounded-full bg-gray-400 flex items-center justify-center text-5xl text-white">
+                  👤
+                </div>
               )}
               <h4 className="text-2xl font-bold mt-2">{contactoDetalle.nombre}</h4>
-              <p className="text-sm text-gray-600 dark:text-gray-400 italic">{nombreGrupo(contactoDetalle.grupo_id) || ""}</p>
+              <p className="text-sm text-gray-600 dark:text-gray-400 italic">
+                {nombreGrupo(contactoDetalle.grupo_id) || ""}
+              </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm px-2">
               <p><strong>📱 Celular:</strong> {contactoDetalle.celular || "—"}</p>
               <p><strong>☎️ Fijo:</strong> {contactoDetalle.telefono_fijo || "—"}</p>
-              <p><strong>✉️ Email:</strong> {contactoDetalle.email || "—"}</p>
+
+              {/* Email con Gmail compose */}
+              <p>
+                <strong>✉️ Email:</strong>{" "}
+                {contactoDetalle.email ? (
+                  <a
+                    href={gmailCompose(contactoDetalle.email)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-blue-600 dark:text-blue-400 underline hover:no-underline"
+                    title="Escribir con Gmail"
+                  >
+                    {contactoDetalle.email}
+                  </a>
+                ) : "—"}
+              </p>
+
               <p><strong>🏢 Empresa:</strong> {contactoDetalle.empresa || "—"}</p>
               <p><strong>📍 Dirección:</strong> {contactoDetalle.direccion || "—"}</p>
               <p><strong>🎂 Nacimiento:</strong> {contactoDetalle.fecha_nacimiento || "—"}</p>
-              <p><strong>📷 Instagram:</strong> {contactoDetalle.instagram || "—"}</p>
-              <p><strong>🎵 TikTok:</strong> {contactoDetalle.tiktok || "—"}</p>
-              <p><strong>💬 WhatsApp:</strong> {contactoDetalle.whatsapp || "—"}</p>
+
+              {/* Instagram */}
+              <p>
+                <strong>📷 Instagram:</strong>{" "}
+                {contactoDetalle.instagram ? (
+                  <a
+                    href={igUrl(contactoDetalle.instagram)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-blue-600 dark:text-blue-400 underline hover:no-underline"
+                  >
+                    {contactoDetalle.instagram}
+                  </a>
+                ) : "—"}
+              </p>
+
+              {/* TikTok */}
+              <p>
+                <strong>🎵 TikTok:</strong>{" "}
+                {contactoDetalle.tiktok ? (
+                  <a
+                    href={tkUrl(contactoDetalle.tiktok)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-blue-600 dark:text-blue-400 underline hover:no-underline"
+                  >
+                    {contactoDetalle.tiktok}
+                  </a>
+                ) : "—"}
+              </p>
+
+              {/* WhatsApp (si existe link) */}
+              <p>
+                <strong>💬 WhatsApp:</strong>{" "}
+                {contactoDetalle.whatsapp ? (
+                  <a
+                    href={contactoDetalle.whatsapp}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-blue-600 dark:text-blue-400 underline hover:no-underline"
+                  >
+                    Abrir conversación
+                  </a>
+                ) : "—"}
+              </p>
             </div>
 
             <div className="flex justify-end gap-3 mt-6">
-              <button onClick={() => { setMostrarDetalle(false); abrirEditar(contactoDetalle); }} className="px-3 py-1 text-xs rounded-lg bg-amber-500 text-white hover:bg-amber-600">Editar</button>
-              <button onClick={() => eliminar(contactoDetalle.id)} className="px-3 py-1 text-xs rounded-lg bg-red-600 text-white hover:bg-red-700">Eliminar</button>
-              <button onClick={() => setMostrarDetalle(false)} className="px-3 py-1 text-xs rounded-lg bg-gray-600 text-white hover:bg-gray-700">Cerrar</button>
+              <button
+                onClick={() => { setMostrarDetalle(false); abrirEditar(contactoDetalle); }}
+                className="px-3 py-1 text-xs rounded-lg bg-amber-500 text-white hover:bg-amber-600"
+              >
+                Editar
+              </button>
+              <button
+                onClick={() => eliminar(contactoDetalle.id)}
+                className="px-3 py-1 text-xs rounded-lg bg-red-600 text-white hover:bg-red-700"
+              >
+                Eliminar
+              </button>
+              <button
+                onClick={() => setMostrarDetalle(false)}
+                className="px-3 py-1 text-xs rounded-lg bg-gray-600 text-white hover:bg-gray-700"
+              >
+                Cerrar
+              </button>
             </div>
           </div>
         </div>
@@ -464,12 +577,16 @@ const Contactos = () => {
       {mostrarModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
           <div className="bg-white dark:bg-gray-900 text-gray-900 dark:text-white rounded-2xl p-5 w-full max-w-3xl max-h-[90vh] overflow-y-auto shadow-xl ring-1 ring-black/10">
-            <h3 className="text-lg md:text-xl font-bold mb-3">{modoEdicion ? "✏️ Editar contacto" : "➕ Nuevo contacto"}</h3>
+            <h3 className="text-lg md:text-xl font-bold mb-3">
+              {modoEdicion ? "✏️ Editar contacto" : "➕ Nuevo contacto"}
+            </h3>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {/* Nombre */}
               <div className="md:col-span-2">
-                <label className="block text-xs font-medium mb-1">Nombre <span className="text-red-500">*</span></label>
+                <label className="block text-xs font-medium mb-1">
+                  Nombre <span className="text-red-500">*</span>
+                </label>
                 <input
                   type="text"
                   value={form.nombre}
@@ -509,7 +626,7 @@ const Contactos = () => {
                     value={form.celular}
                     onChange={(e) => setForm(s => ({ ...s, celular: e.target.value }))}
                     className={`w-full h-10 px-3 rounded-xl border text-sm focus:outline-none focus:ring-2
-                      {!form.celular?.trim() ? "border-red-500 focus:ring-red-400" : "border-gray-300 dark:border-gray-700 focus:ring-blue-400"}
+                      ${!form.celular?.trim() ? "border-red-500 focus:ring-red-400" : "border-gray-300 dark:border-gray-700 focus:ring-blue-400"}
                       bg-white dark:bg-gray-900 text-gray-900 dark:text-white`}
                   />
                 </div>
@@ -558,7 +675,6 @@ const Contactos = () => {
                 </div>
               </div>
 
-
               {/* Instagram / TikTok */}
               <div>
                 <label className="block text-xs font-medium mb-1">Instagram</label>
@@ -595,24 +711,33 @@ const Contactos = () => {
                 <label className="block text-xs font-medium mb-1">Grupo</label>
                 <select
                   value={form.grupo_id === null ? "" : form.grupo_id}
-                  onChange={(e) => setForm((s) => ({ ...s, grupo_id: e.target.value === "" ? "" : Number(e.target.value) }))}
+                  onChange={(e) =>
+                    setForm((s) => ({
+                      ...s,
+                      grupo_id: e.target.value === "" ? "" : Number(e.target.value),
+                    }))
+                  }
                   className="w-full px-3 py-2 rounded-xl border text-sm focus:outline-none focus:ring-2 border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
                 >
                   <option value="">-- Selecciona grupo --</option>
                   {grupos.map((g) => (
-                    <option key={g.id} value={g.id}>{g.nombre}</option>
+                    <option key={g.id} value={g.id}>
+                      {g.nombre}
+                    </option>
                   ))}
                 </select>
               </div>
 
-              {/* Foto: archivo + subir + checkbox favorito (igual que tenías) */}
+              {/* Foto: archivo + subir + checkbox favorito */}
               <div className="md:col-span-2">
                 <label className="block text-xs font-medium mb-1">Foto (subir archivo)</label>
                 <div className="flex gap-2 items-center">
                   <input
                     type="file"
                     accept="image/*"
-                    onChange={(e) => setForm((s) => ({ ...s, archivoFoto: e.target.files?.[0] || null }))}
+                    onChange={(e) =>
+                      setForm((s) => ({ ...s, archivoFoto: e.target.files?.[0] || null }))
+                    }
                     className="text-sm"
                   />
                   <button
@@ -634,7 +759,9 @@ const Contactos = () => {
                       <input
                         type="checkbox"
                         checked={!!form.favorito}
-                        onChange={(e) => setForm((s) => ({ ...s, favorito: e.target.checked ? 1 : 0 }))}
+                        onChange={(e) =>
+                          setForm((s) => ({ ...s, favorito: e.target.checked ? 1 : 0 }))
+                        }
                       />
                       <span>Marcar como favorito</span>
                     </label>
@@ -644,10 +771,21 @@ const Contactos = () => {
             </div>
 
             <div className="mt-3 flex justify-end gap-3">
-              <button onClick={() => { setMostrarModal(false); setModoEdicion(false); setContactoEditando(null); }} className="px-4 py-1 rounded-xl bg-gray-600 text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-400 text-sm">
+              <button
+                onClick={() => {
+                  setMostrarModal(false);
+                  setModoEdicion(false);
+                  setContactoEditando(null);
+                }}
+                className="px-4 py-1 rounded-xl bg-gray-600 text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-400 text-sm"
+              >
                 Cancelar
               </button>
-              <button onClick={guardar} disabled={isEmpty(form.nombre) || isEmpty(form.celular)} className="px-4 py-1 rounded-xl bg-green-600 text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-400 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+              <button
+                onClick={guardar}
+                disabled={isEmpty(form.nombre) || isEmpty(form.celular)}
+                className="px-4 py-1 rounded-xl bg-green-600 text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-400 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
                 {modoEdicion ? "Guardar cambios" : "Guardar"}
               </button>
             </div>
@@ -658,5 +796,3 @@ const Contactos = () => {
   );
 };
 export default Contactos;
-
-

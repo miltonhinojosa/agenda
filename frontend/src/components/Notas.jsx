@@ -14,7 +14,7 @@ const COLORS = [
   { key: "rose",    bg: "bg-rose-200 dark:bg-rose-800", ring: "ring-rose-400" },
 ];
 
-/* ===== helper ÚNICO añadido para sesión (cookies) ===== */
+/* ===== helper ÚNICO para sesión (cookies) ===== */
 const withCreds = (url, opts = {}) => fetch(url, { credentials: "include", ...opts });
 
 /* ================= Helpers ================= */
@@ -56,6 +56,9 @@ const Notas = () => {
     contactosIds: [],
   });
 
+  // Checkbox: mostrar/ocultar selector de contactos
+  const [vincularContactos, setVincularContactos] = useState(false);
+
   /* ============ Carga ============ */
   const cargarNotas = async () => {
     setCargandoNotas(true);
@@ -87,12 +90,8 @@ const Notas = () => {
     }
   };
 
-  useEffect(() => {
-    cargarContactos();
-  }, []);
-  useEffect(() => {
-    cargarNotas();
-  }, [tabEstado]);
+  useEffect(() => { cargarContactos(); }, []);
+  useEffect(() => { cargarNotas(); }, [tabEstado]);
 
   /* ============ Filtrado ============ */
   const notasFiltradas = useMemo(() => {
@@ -151,14 +150,16 @@ const Notas = () => {
       fijada: 0,
       archivada: tabEstado === "a" ? 1 : 0,
       recordatorio_en: "",
-      contactosIds: filtroContacto !== "todos" ? [Number(filtroContacto)] : [],
+      contactosIds: [], // ← sin contactos al crear
     });
+    setVincularContactos(false); // ← selector oculto por defecto
     setMostrarModal(true);
   };
 
   const abrirEditar = (n) => {
     setModoEdicion(true);
     setNotaEditando(n);
+    const ids = (n.contactos || []).map((c) => c.id);
     setForm({
       titulo: n.titulo || "",
       contenido: n.contenido || "",
@@ -166,8 +167,9 @@ const Notas = () => {
       fijada: Number(n.fijada) ? 1 : 0,
       archivada: Number(n.archivada) ? 1 : 0,
       recordatorio_en: n.recordatorio_en || "",
-      contactosIds: (n.contactos || []).map((c) => c.id),
+      contactosIds: ids,
     });
+    setVincularContactos(ids.length > 0); // ← auto ON si la nota ya tenía contactos
     setMostrarModal(true);
   };
 
@@ -181,7 +183,7 @@ const Notas = () => {
       fijada: Number(form.fijada) ? 1 : 0,
       archivada: Number(form.archivada) ? 1 : 0,
       recordatorio_en: form.recordatorio_en || null,
-      contactosIds: form.contactosIds || [],
+      contactosIds: vincularContactos ? (form.contactosIds || []) : [], // ← clave
     };
 
     if (modoEdicion && notaEditando) {
@@ -212,7 +214,7 @@ const Notas = () => {
         <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
           {/* Izq: Título + Tabs + Filtro contacto */}
           <div className="flex-1 flex flex-wrap items-center gap-4">
-            <h2 className="text-2xl font-semibold text-gray-900 dark:text-white">
+            <h2 className="text-2xl md:text-3xl font-semibold text-gray-900 dark:text-white">
               📝 Notas
             </h2>
 
@@ -317,7 +319,7 @@ const Notas = () => {
                   </p>
                 </div>
 
-                {/* Iconos fijar/archivar (restaurados) */}
+                {/* Iconos fijar/archivar */}
                 <div className="flex gap-2 shrink-0">
                   {/* Fijar/Desfijar */}
                   <button
@@ -456,7 +458,7 @@ const Notas = () => {
                 </div>
               </div>
 
-              {/* Fijar / Archivar */}
+              {/* Fijar / Archivar / Vincular contactos */}
               <div className="flex items-center gap-6">
                 <label className="inline-flex items-center gap-2 text-sm">
                   <input
@@ -478,47 +480,60 @@ const Notas = () => {
                   />
                   <span>Archivar</span>
                 </label>
+                <label className="inline-flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={vincularContactos}
+                    onChange={(e) => setVincularContactos(e.target.checked)}
+                  />
+                  <span>Vincular contactos</span>
+                </label>
               </div>
 
-              {/* Recordatorio */}
-              <div>
-                <label className="block text-xs font-medium mb-1 text-gray-700 dark:text-gray-300">
-                  Recordatorio (fecha y hora)
-                </label>
-                <input
-                  type="datetime-local"
-                  value={form.recordatorio_en || ""}
-                  onChange={(e) =>
-                    setForm((s) => ({ ...s, recordatorio_en: e.target.value }))
-                  }
-                  className="w-full px-2 py-1 rounded border text-sm dark:bg-gray-800 dark:text-white border-gray-300 dark:border-gray-700"
-                />
-              </div>
+              {/* Recordatorio + (opcional) Contactos en la misma fila */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:col-span-2">
+                {/* Recordatorio */}
+                <div>
+                  <label className="block text-xs font-medium mb-1 text-gray-700 dark:text-gray-300">
+                    Recordatorio (fecha y hora)
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={form.recordatorio_en || ""}
+                    onChange={(e) =>
+                      setForm((s) => ({ ...s, recordatorio_en: e.target.value }))
+                    }
+                    className="w-full px-2 py-1 rounded border text-sm dark:bg-gray-800 dark:text-white border-gray-300 dark:border-gray-700"
+                  />
+                </div>
 
-              {/* Contactos (multi) */}
-              <div>
-                <label className="block text-xs font-medium mb-1 text-gray-700 dark:text-gray-300">
-                  Vincular contactos (opcional)
-                </label>
-                <select
-                  multiple
-                  value={form.contactosIds.map(String)}
-                  onChange={(e) =>
-                    setForm((s) => ({
-                      ...s,
-                      contactosIds: Array.from(e.target.selectedOptions).map((o) =>
-                        Number(o.value)
-                      ),
-                    }))
-                  }
-                  className="w-full px-2 py-2 rounded border text-sm dark:bg-gray-800 dark:text-white border-gray-300 dark:border-gray-700 h-28"
-                >
-                  {contactos.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.nombre}
-                    </option>
-                  ))}
-                </select>
+                {/* Contactos (solo si checkbox activo) */}
+                {vincularContactos && (
+                  <div>
+                    <label className="block text-xs font-medium mb-1 text-gray-700 dark:text-gray-300">
+                      Vincular contactos
+                    </label>
+                    <select
+                      multiple
+                      value={form.contactosIds.map(String)}
+                      onChange={(e) =>
+                        setForm((s) => ({
+                          ...s,
+                          contactosIds: Array.from(e.target.selectedOptions).map((o) =>
+                            Number(o.value)
+                          ),
+                        }))
+                      }
+                      className="w-full px-2 py-2 rounded border text-sm dark:bg-gray-800 dark:text-white border-gray-300 dark:border-gray-700 h-28"
+                    >
+                      {contactos.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.nombre}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -535,7 +550,7 @@ const Notas = () => {
                 Cancelar
               </button>
               <button
-                onClick={guardar}
+                onClick={GuardarSafe(guardar)}
                 disabled={isEmpty(form.titulo) || isEmpty(form.contenido)}
                 className="px-4 py-1 rounded-xl bg-green-600 text-white hover:bg-green-700
                            focus:outline-none focus:ring-2 focus:ring-green-400 text-sm
@@ -550,5 +565,15 @@ const Notas = () => {
     </div>
   );
 };
+
+// Previene doble click
+function GuardarSafe(fn) {
+  let running = false;
+  return async () => {
+    if (running) return;
+    running = true;
+    try { await fn(); } finally { running = false; }
+  };
+}
 
 export default Notas;
