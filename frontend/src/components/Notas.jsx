@@ -213,8 +213,8 @@ const Notas = () => {
       <div className="mb-4">
         <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
           {/* Izq: Título + Tabs + Filtro contacto */}
-          <div className="flex-1 flex flex-wrap items-center gap-4">
-            <h2 className="text-2xl md:text-3xl font-semibold text-gray-900 dark:text-white">
+          <div className="flex-1 flex flex-wrap items-center gap-3">
+            <h2 className="text-2xl font-semibold text-gray-900 dark:text-white">
               📝 Notas
             </h2>
 

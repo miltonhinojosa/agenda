@@ -6,11 +6,12 @@ import Citas from './components/Citas';
 import Notas from './components/Notas';
 import Tareas from './components/Tareas';
 import Auth from './components/Auth';
+import Home from './components/Home';
 
 const API = 'http://localhost:3000/api';
 
 const App = () => {
-  const [seccion, setSeccion] = useState('contactos');
+  const [seccion, setSeccion] = useState('home');
   const [modoOscuro, setModoOscuro] = useState(false);
 
   // === Autenticación ===
@@ -49,6 +50,7 @@ const App = () => {
 
   const renderSeccion = () => {
     switch (seccion) {
+      case 'home': return <Home />;
       case 'eventos': return <Eventos />;
       case 'citas': return <Citas />;
       case 'notas': return <Notas />;
@@ -69,6 +71,7 @@ const App = () => {
     <div className="min-h-screen bg-gray-100 text-black dark:bg-gray-900 dark:text-white transition-colors">
       <nav className="flex justify-between p-4 shadow-md dark:shadow-gray-700">
         <div className="flex gap-4 flex-wrap">
+          <button onClick={() => setSeccion('home')}>🏠 Inicio</button>
           <button onClick={() => setSeccion('contactos')}>📇 Contactos</button>
           <button onClick={() => setSeccion('eventos')}>📅 Eventos</button>
           <button onClick={() => setSeccion('citas')}>📆 Citas</button>

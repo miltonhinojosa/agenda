@@ -367,9 +367,9 @@ const Citas = () => {
       )}
 
       {/* Encabezado */}
-      <div className="mb-3">
+      <div className="mb-4">
         <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
-          <div className="flex-1 flex flex-wrap items-center gap-4">
+          <div className="flex-1 flex flex-wrap items-center gap-3">
             <h2 className="text-2xl font-bold text-gray-800 dark:text-white">📅 Citas</h2>
 
             <div className="flex gap-2 flex-wrap">

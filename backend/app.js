@@ -50,6 +50,8 @@ app.use('/api/citas', require('./routes/citas'));
 app.use('/api/notas', require('./routes/notas'));
 app.use('/api/tareas', require('./routes/tareas'));
 app.use('/api/grupos', require('./routes/grupos'));
+app.use('/api/contactos', require('./routes/contactos-export'));
+app.use('/api/eventos', require('./routes/eventos-export'));
 app.use('/api/upload', uploadRouter);
 
 // Carpeta pública para fotos

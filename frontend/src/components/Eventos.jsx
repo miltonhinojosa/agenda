@@ -388,13 +388,25 @@ const Eventos = () => {
       )}
 
       {/* Encabezado */}
-      <div className="mb-3">
+      <div className="mb-4">
         <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
           <div className="flex-1 flex flex-wrap items-center gap-3">
             <h2 className="text-2xl font-semibold text-gray-900 dark:text-white">
               📆 Eventos
             </h2>
-
+            {/* Export eventos ICS*/}
+            <a
+              href={
+                import.meta.env.DEV
+                  ? `http://localhost:3000/api/eventos/export/ics${tab==="Cumpleaños" ? "?categoria=Cumpleaños" : tab!=="Todos" ? "?estado="+encodeURIComponent(tab) : ""}`
+                  : `/api/eventos/export/ics${tab==="Cumpleaños" ? "?categoria=Cumpleaños" : tab!=="Todos" ? "?estado="+encodeURIComponent(tab) : ""}`
+              }
+              className="text-xs px-2 py-1 rounded-lg border border-gray-300 dark:border-gray-700
+                        hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+              title="Exportar eventos a .ics"
+            >
+              Exportar ICS
+            </a>
             <div className="flex gap-2 flex-wrap">
               {["Activo", "Archivado", "Cancelado", "Todos", "Cumpleaños"].map((t) => (
                 <button
