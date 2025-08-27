@@ -1,3 +1,0 @@
-ahora quiero un nuevo modulo que sera la pagina principal donde estara lo mejor de los cinco modulos,
- quiero que me ayudes a diseñarlo ya que sera la parte mas bonita del proyecto, 
-quiero que me recomiendes que poner como por ejemplo un calendario donde poder marcar una fecha y poner un evento o cita

@@ -1,7 +1,3 @@
-# agenda
-proyecto final
-
-
 Como arrancar el proyecto 
 1 Descomprimir el proyecto 
 2 En la carpeta raiz del proyecto llamada agenda abrir el CMD
