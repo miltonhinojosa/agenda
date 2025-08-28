@@ -7,6 +7,8 @@ import Notas from './components/Notas';
 import Tareas from './components/Tareas';
 import Auth from './components/Auth';
 import Home from './components/Home';
+import CitasNotifier from './hooks/useCitasNotificaciones.jsx';
+
 
 const API = 'http://localhost:3000/api';
 
@@ -105,6 +107,9 @@ const App = () => {
       </nav>
 
       <main className="p-6">{renderSeccion()}</main>
+
+      {/* Notificador global: activo en cualquier sección */}
+      <CitasNotifier /> {/* <- AÑADIDO */}
     </div>
   );
 };

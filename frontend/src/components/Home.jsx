@@ -1,13 +1,15 @@
 import React, { useEffect, useMemo, useState } from "react";
 
 const API = "http://localhost:3000/api";
-const ORIGIN = "http://localhost:3000"; // donde sirve archivos el backend
+const ORIGIN = "http://localhost:3000";
 
 /* ===== Helpers ===== */
 const pad = (n) => String(n).padStart(2, "0");
 const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const fmtDate = (s) =>
   s ? new Date(s).toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short" }) : "";
+const fmtDateShort = (s) =>
+  s ? new Date(s).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" }) : "";
 const fmtDateTime = (s) =>
   s ? new Date(s).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "";
 const startOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
@@ -16,6 +18,8 @@ const addMonths = (d, n) => new Date(d.getFullYear(), d.getMonth() + n, 1);
 const isSameDay = (a, b) =>
   a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 const isOverdue = (iso) => (iso ? new Date(iso).getTime() < Date.now() : false);
+const floorDate = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
 
 // Normaliza url de foto (absoluta o servida por backend)
 const photoURL = (u) => {
@@ -25,7 +29,14 @@ const photoURL = (u) => {
   return trimmed.startsWith("/") ? `${ORIGIN}${trimmed}` : `${ORIGIN}/${trimmed}`;
 };
 
-export default function Home() {
+// Estados válidos EXACTOS para mostrar en Home (respetando mayúscula inicial)
+const estadoVisibleCita = (c) => {
+  const e = String(c.estado || "");
+  return e === "Pendiente" || e === "Activo";
+};
+const isActiva = (c) => String(c.estado || "") === "Activo";
+
+export default function Home({ setSeccion }) {
   const [cargando, setCargando] = useState(true);
   const [err, setErr] = useState("");
 
@@ -93,7 +104,7 @@ export default function Home() {
     (eventos || []).forEach((e) => {
       if (!e.inicio) return;
       const d = new Date(e.inicio);
-      if (d >= new Date(m0.getFullYear(), m0.getMonth(), 1) && d <= new Date(m1.getFullYear(), m1.getDate(), 23, 59, 59)) {
+      if (d >= new Date(m0.getFullYear(), m0.getMonth(), 1) && d <= new Date(m1.getFullYear(), m1.getMonth(), m1.getDate(), 23, 59, 59)) {
         const k = ymd(d);
         if (!map[k]) map[k] = [];
         map[k].push(e);
@@ -112,19 +123,36 @@ export default function Home() {
         .slice(0, 6),
     [eventos]
   );
-  const citasProximas = useMemo(
-    () =>
-      (citas || [])
-        .map((c) => ({ ...c, _when: c.fecha ? new Date(c.hora ? `${c.fecha}T${c.hora}` : c.fecha) : null }))
-        .filter((c) => c._when && c._when >= today && c._when <= in7)
-        .sort((a, b) => a._when - b._when)
-        .slice(0, 6),
-    [citas]
-  );
+
+  // Citas próximas (solo "Pendiente" o "Activo")
+  const citasProximas = useMemo(() => {
+  const today0 = floorDate(new Date());
+  const in7 = new Date(today0.getTime() + 7 * 86400000);
+
+  const enriched = (citas || []).map((c) => {
+    const when = c.fecha ? new Date(c.hora ? `${c.fecha}T${c.hora}` : c.fecha) : null;
+    const whenDay = when ? floorDate(when) : null;
+    return { ...c, _when: when, _whenDay: whenDay };
+  });
+
+  return enriched
+    // Solo estados visibles exactos (Pendiente / Activo)
+    .filter(estadoVisibleCita)
+    // Ventana por FECHA (ignora la hora): hoy .. hoy+7
+    .filter((c) => c._whenDay && c._whenDay >= today0 && c._whenDay <= in7)
+    // Ordena por el momento real (_when) si existe; si no, por el día
+    .sort((a, b) => {
+      const ta = a._when ? a._when.getTime() : a._whenDay.getTime();
+      const tb = b._when ? b._when.getTime() : b._whenDay.getTime();
+      return ta - tb;
+    })
+    .slice(0, 6);
+  }, [citas]);
+
 
   // Tareas pendientes
   const tareasPendientes = useMemo(() => {
-    const pend = (tareas || []).filter((t) => Number(t.completada) === 0);
+    const pend = (tareas || []).filter((t) => Number(t.completado) === 0);
     return pend
       .sort((a, b) => {
         const ta = a.vencimiento ? new Date(a.vencimiento).getTime() : Infinity;
@@ -143,15 +171,6 @@ export default function Home() {
     [contactos]
   );
 
-  // Datos para modal de día
-  const modalData = useMemo(() => {
-    if (!modalFecha) return { ev: [], ci: [], ta: [] };
-    const ev = (eventosPorDia[modalFecha] || []).sort((a, b) => new Date(a.inicio) - new Date(b.inicio));
-    const ci = (citas || []).filter((c) => (c.fecha || "") === modalFecha);
-    const ta = (tareas || []).filter((t) => (t.vencimiento || "") === modalFecha);
-    return { ev, ci, ta };
-  }, [modalFecha, eventosPorDia, citas, tareas]);
-
   /* ===== UI ===== */
   const chip = (txt) => (
     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-100">
@@ -159,25 +178,28 @@ export default function Home() {
     </span>
   );
 
-  // Badge de tipo con fondo de color SIN redondeado
-  const Rect = ({ kind, children }) => {
-    // kind: 'cumple', 'evento', 'cita', 'tarea'
+  // Rect sin bordes redondeados (no clicable)
+  const Rect = ({ kind, children, title }) => {
     const base =
       "inline-flex items-center justify-center text-[10px] font-bold px-1.5 py-[1px] leading-4 rounded-none";
     const styles = {
-      cumple: "", // 🎂 sin fondo de color
+      cumple: "bg-transparent text-base", // 🎂 sin fondo
       evento: "bg-blue-600 text-white",
       cita: "bg-violet-600 text-white",
       tarea: "bg-emerald-600 text-white",
     };
-    return <span className={`${base} ${styles[kind] || ""}`}>{children}</span>;
+    return (
+      <span className={`${base} ${styles[kind] || ""}`} title={title}>
+        {children}
+      </span>
+    );
   };
 
   return (
-    <div className="px-3 py-3">
+    <div className="px-2 py-2">
       {/* Título + acciones */}
       <div className="mb-3 flex items-center justify-between flex-wrap gap-3">
-        <h2 className="text-2xl md:text-3xl font-semibold text-gray-900 dark:text-white">🏠 Inicio</h2>
+        <h2 className="text-2xl font-semibold text-gray-900 dark:text-white">🏠 Inicio</h2>
         <button
           onClick={fetchAll}
           className="px-3 py-1.5 rounded-xl border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 text-sm"
@@ -206,7 +228,7 @@ export default function Home() {
         <>
           {/* FILA 1: Calendario + Próximos 7 días */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
-            {/* Calendario mensual*/}
+            {/* Calendario mensual */}
             <div className="lg:col-span-2 rounded-2xl ring-1 ring-black/10 dark:ring-white/10 bg-white dark:bg-gray-900 p-2.5">
               {/* Header calendario */}
               <div className="flex items-center justify-between">
@@ -250,18 +272,17 @@ export default function Home() {
                 ))}
               </div>
 
-              {/* Grilla */}
+              {/* Grilla: número con badges a la derecha (no clicables) */}
               <div className="grid grid-cols-7 gap-1">
                 {daysInMonth.map((d, idx) => {
                   if (!d) return <div key={`empty-${idx}`} className="h-10 sm:h-12 rounded-lg bg-transparent" />;
                   const k = ymd(d);
                   const list = eventosPorDia[k] || [];
 
-                  // Tipos presentes ese día
                   const hasCumple = list.some((e) => (e.categoria || "").toLowerCase() === "cumpleaños");
-                  const hasEvento = list.some((e) => (e.categoria || "").toLowerCase() !== "cumpleaños"); // cualquier evento no-cumple
+                  const hasEvento = list.some((e) => (e.categoria || "").toLowerCase() !== "cumpleaños");
                   const hasCita = (citas || []).some((c) => (c.fecha || "") === k);
-                  const hasTarea = (tareas || []).some((t) => Number(t.completada) === 0 && (t.vencimiento || "") === k);
+                  const hasTarea = (tareas || []).some((t) => Number(t.completado) === 0 && (t.vencimiento || "") === k);
 
                   const isToday = isSameDay(d, today);
 
@@ -290,13 +311,11 @@ export default function Home() {
                         >
                           {d.getDate()}
                         </div>
-
-                        {/* Badges a la derecha */}
                         <div className="flex items-center gap-1">
-                          {hasCumple && <Rect kind="cumple">🎂</Rect>}
-                          {hasEvento && <Rect kind="evento">E</Rect>}
-                          {hasCita && <Rect kind="cita">C</Rect>}
-                          {hasTarea && <Rect kind="tarea">T</Rect>}
+                          {hasCumple && <Rect kind="cumple" title="Cumpleaños">🎂</Rect>}
+                          {hasEvento && <Rect kind="evento" title="Eventos">E</Rect>}
+                          {hasCita && <Rect kind="cita" title="Citas">C</Rect>}
+                          {hasTarea && <Rect kind="tarea" title="Tareas pendientes">T</Rect>}
                         </div>
                       </div>
                     </button>
@@ -320,7 +339,7 @@ export default function Home() {
                   <div key={`e-${e.id}`} className="p-2 rounded-xl bg-gray-50 dark:bg-gray-800/60">
                     <div className="flex items-center justify-between">
                       <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{e.titulo}</div>
-                      <div className="text-[11px] text-gray-600 dark:text-gray-300">{fmtDateTime(e.inicio)}</div>
+                      <div className="text-[11px] text-gray-600 dark:text-gray-300">{fmtDateShort(e.inicio)}</div>
                     </div>
                     <div className="text-[11px] text-gray-600 dark:text-gray-300 mt-0.5">
                       {(e.categoria || "").toLowerCase() === "cumpleaños" ? "🎂 Cumpleaños" : e.categoria || ""}
@@ -330,13 +349,17 @@ export default function Home() {
                 ))}
 
                 {citasProximas.map((c) => (
-                  <div key={`c-${c.id}`} className="p-2 rounded-xl bg-gray-50 dark:bg-gray-800/60">
+                  <div
+                    key={`c-${c.id}`}
+                    className={`p-2 rounded-xl bg-gray-50 dark:bg-gray-800/60 ${
+                      isActiva(c) ? "animate-pulse ring-1 ring-violet-400/60" : ""
+                    }`}
+                  >
                     <div className="flex items-center justify-between">
-                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{c.titulo || c.asunto || "Cita"}</div>
-                      <div className="text-[11px] text-gray-600 dark:text-gray-300">
-                        {c.fecha}
-                        {c.hora ? ` • ${c.hora}` : ""}
+                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                        {c.titulo || c.asunto || "Cita"}
                       </div>
+                      <div className="text-[11px] text-gray-600 dark:text-gray-300">{fmtDateShort(c._when)}</div>
                     </div>
                     {c.lugar && <div className="text-[11px] text-gray-600 dark:text-gray-300">{c.lugar}</div>}
                   </div>
@@ -367,7 +390,7 @@ export default function Home() {
                     <div className="flex items-center justify-between">
                       <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{t.titulo}</div>
                       <div className="text-[11px] text-gray-600 dark:text-gray-300">
-                        {t.vencimiento ? fmtDate(t.vencimiento) : "—"}
+                        {t.vencimiento ? fmtDateShort(t.vencimiento) : "—"}
                       </div>
                     </div>
                     {t.descripcion && (
@@ -440,17 +463,24 @@ export default function Home() {
           {modalFecha && (
             <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-3">
               <div className="bg-white dark:bg-gray-900 text-gray-900 dark:text-white w-full max-w-2xl rounded-2xl p-4 ring-1 ring-black/10 dark:ring-white/10">
-                <div className="flex items-center justify-between">
+                {/* Header modal */}
+                <div className="flex items-center justify-between gap-3">
                   <h4 className="text-lg font-semibold">📌 {modalFecha}</h4>
                   <button
                     onClick={() => setModalFecha(null)}
-                    className="px-2 py-1 rounded-lg border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800"
+                    className="px-2 py-1 rounded-lg border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 text-xs"
                   >
                     Cerrar
                   </button>
                 </div>
 
-                <ModalDia fecha={modalFecha} eventosPorDia={eventosPorDia} citas={citas} tareas={tareas} />
+                <ModalDia
+                  fecha={modalFecha}
+                  eventosPorDia={eventosPorDia}
+                  citas={citas}
+                  tareas={tareas}
+                  setSeccion={setSeccion}
+                />
               </div>
             </div>
           )}
@@ -461,9 +491,9 @@ export default function Home() {
 }
 
 /* === Subcomponente: contenido del modal por día === */
-function ModalDia({ fecha, eventosPorDia, citas, tareas }) {
+function ModalDia({ fecha, eventosPorDia, citas, tareas, setSeccion }) {
   const ev = (eventosPorDia[fecha] || []).sort((a, b) => new Date(a.inicio) - new Date(b.inicio));
-  const ci = (citas || []).filter((c) => (c.fecha || "") === fecha);
+  const ci = (citas || []).filter((c) => (c.fecha || "") === fecha && estadoVisibleCita(c));
   const ta = (tareas || []).filter((t) => (t.vencimiento || "") === fecha);
 
   const chip = (txt) => (
@@ -475,13 +505,28 @@ function ModalDia({ fecha, eventosPorDia, citas, tareas }) {
   const fmtDateTime = (s) =>
     s ? new Date(s).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "";
 
+  const gotoCrear = (seccion) => {
+    localStorage.setItem("fechaNueva", fecha);
+    setSeccion(seccion);
+  };
+
   return (
     <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
       {/* Eventos */}
       <div className="rounded-xl p-3 bg-gray-50 dark:bg-gray-800/60">
         <div className="flex items-center justify-between mb-2">
           <div className="font-medium">Eventos</div>
-          {chip(String(ev.length))}
+          <div className="flex items-center gap-2">
+            {chip(String(ev.length))}
+            <button
+              onClick={() => gotoCrear("eventos")}
+              className="px-2 py-0.5 rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50
+                         dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900/30 text-xs"
+              title="Nuevo evento en esta fecha"
+            >
+              ➕
+            </button>
+          </div>
         </div>
         <div className="space-y-2">
           {ev.length === 0 && <div className="text-sm text-gray-600 dark:text-gray-300">Sin eventos.</div>}
@@ -501,17 +546,28 @@ function ModalDia({ fecha, eventosPorDia, citas, tareas }) {
       <div className="rounded-xl p-3 bg-gray-50 dark:bg-gray-800/60">
         <div className="flex items-center justify-between mb-2">
           <div className="font-medium">Citas</div>
-          {chip(String(ci.length))}
+          <div className="flex items-center gap-2">
+            {chip(String(ci.length))}
+            <button
+              onClick={() => gotoCrear("citas")}
+              className="px-2 py-0.5 rounded-lg border border-violet-300 text-violet-700 hover:bg-violet-50
+                         dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/30 text-xs"
+              title="Nueva cita en esta fecha"
+            >
+              ➕
+            </button>
+          </div>
         </div>
         <div className="space-y-2">
           {ci.length === 0 && <div className="text-sm text-gray-600 dark:text-gray-300">Sin citas.</div>}
           {ci.map((c) => (
-            <div key={`ci-${c.id}`} className="text-sm">
+            <div key={`ci-${c.id}`} className={`text-sm ${isActiva(c) ? "animate-pulse" : ""}`}>
               <div className="font-medium">{c.titulo || c.asunto || "Cita"}</div>
               <div className="text-xs text-gray-600 dark:text-gray-300">
                 {c.fecha}
                 {c.hora ? ` • ${c.hora}` : ""}
                 {c.lugar ? ` • ${c.lugar}` : ""}
+                {c.estado ? ` • ${c.estado}` : ""}
               </div>
             </div>
           ))}
@@ -522,7 +578,17 @@ function ModalDia({ fecha, eventosPorDia, citas, tareas }) {
       <div className="rounded-xl p-3 bg-gray-50 dark:bg-gray-800/60">
         <div className="flex items-center justify-between mb-2">
           <div className="font-medium">Tareas</div>
-          {chip(String(ta.length))}
+          <div className="flex items-center gap-2">
+            {chip(String(ta.length))}
+            <button
+              onClick={() => gotoCrear("tareas")}
+              className="px-2 py-0.5 rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50
+                         dark:border-emerald-700 dark:text-emerald-300 dark:hover:bg-emerald-900/30 text-xs"
+              title="Nueva tarea en esta fecha"
+            >
+              ➕
+            </button>
+          </div>
         </div>
         <div className="space-y-2">
           {ta.length === 0 && <div className="text-sm text-gray-600 dark:text-gray-300">Sin tareas.</div>}
@@ -531,7 +597,7 @@ function ModalDia({ fecha, eventosPorDia, citas, tareas }) {
               <div className="font-medium">{t.titulo}</div>
               <div className="text-xs text-gray-600 dark:text-gray-300">
                 {t.descripcion ? `${t.descripcion.substring(0, 60)}${t.descripcion.length > 60 ? "…" : ""}` : ""}
-                {Number(t.completada) ? " • Completada" : ""}
+                {Number(t.completado) ? " • Completada" : ""}
               </div>
             </div>
           ))}
