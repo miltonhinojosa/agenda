@@ -4,6 +4,26 @@ const API = "http://localhost:3000/api";
 const ORIGIN = "http://localhost:3000";
 
 /* ===== Helpers ===== */
+// === Helpers LOCAL para Tareas (YYYY-MM-DD como fecha local, sin corrimiento) ===
+const parseLocalYMD = (s) => {
+  if (!s) return null;
+  const str = String(s);
+  if (str.length === 10 && str[4] === "-" && str[7] === "-") {
+    const [y, m, d] = str.split("-").map(Number);
+    return new Date(y, (m || 1) - 1, d || 1); // local (no UTC shift)
+  }
+  const d = new Date(str);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+const labelLocalYMD = (s) => {
+  const d = parseLocalYMD(s);
+  return d ? d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" }) : "—";
+};
+const isOverdueLocal = (s) => {
+  const d = parseLocalYMD(s);
+  if (!d) return false;
+  return floorDate(d).getTime() < floorDate(new Date()).getTime();
+};
 const pad = (n) => String(n).padStart(2, "0");
 const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const fmtDate = (s) =>
@@ -12,6 +32,20 @@ const fmtDateShort = (s) =>
   s ? new Date(s).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" }) : "";
 const fmtDateTime = (s) =>
   s ? new Date(s).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "";
+const fmtTime = (s) => (s ? new Date(s).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "");
+
+// Obtiene el nombre del contacto de una cita
+// Obtiene el nombre del contacto de una cita (sin depender de 'contactos')
+// Nombre del contacto de una cita (usa campos directos o busca por contacto_id en la lista 'contactos')
+const nombreContacto = (c, contactosList = []) => {
+  if (!c) return "";
+  const directo = c.contacto_nombre || c.nombre || c.contacto;
+  if (directo) return directo;
+  const id = c.contacto_id ?? c.id_contacto ?? c.contactoId;
+  if (id == null) return "";
+  const found = (contactosList || []).find(x => String(x.id) === String(id));
+  return (found && (found.nombre || found.contacto_nombre || found.nombre_completo)) || "";
+};
 const startOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
 const endOfMonth = (d) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
 const addMonths = (d, n) => new Date(d.getFullYear(), d.getMonth() + n, 1);
@@ -34,6 +68,21 @@ const estadoVisibleCita = (c) => {
   const e = String(c.estado || "");
   return e === "Pendiente" || e === "Activo";
 };
+
+// Estados válidos para EVENTOS en Home (Activo o Pendiente)
+const estadoVisibleEvento = (e) => {
+  const est = String(e.estado || "");
+  return est === "Activo" || est === "Pendiente";
+};
+// Evento activo (para parpadeo en la UI)
+const isActivoEvento = (e) => String(e.estado || "") === "Activo";
+
+// ¿Es cumpleaños?
+const esCumple = (e) => {
+  const cat = String(e.categoria || "").toLowerCase();
+  return cat === "cumpleaños" || cat === "cumpleanos";
+};
+
 const isActiva = (c) => String(c.estado || "") === "Activo";
 
 export default function Home({ setSeccion }) {
@@ -114,17 +163,26 @@ export default function Home({ setSeccion }) {
   }, [eventos, month]);
 
   // Próximos 7 días
-  const in7 = new Date(today.getTime() + 7 * 86400000);
-  const eventosProximos = useMemo(
-    () =>
-      (eventos || [])
-        .filter((e) => e.inicio && new Date(e.inicio) >= today && new Date(e.inicio) <= in7)
-        .sort((a, b) => new Date(a.inicio) - new Date(b.inicio))
-        .slice(0, 6),
-    [eventos]
-  );
+  const eventosProximos = useMemo(() => {
+    const today0 = floorDate(new Date());
+    const in7 = new Date(today0.getTime() + 7 * 86400000);
 
-  // Citas próximas (solo "Pendiente" o "Activo")
+    return (eventos || [])
+      .filter((e) => e && e.inicio)              // requiere fecha de inicio
+      .filter(estadoVisibleEvento)               // solo Activo/Pendiente
+      .filter((e) => {
+        const dIni = floorDate(new Date(e.inicio));
+        const dFin = e.fin ? floorDate(new Date(e.fin)) : dIni;
+        // Cumpleaños: mostrar SOLO el mismo día
+        if (esCumple(e)) return isSameDay(dIni, today0);
+        // Otros eventos: si se solapa con [hoy..+7d]
+        return dFin >= today0 && dIni <= in7;
+      })
+      .sort((a, b) => new Date(a.inicio) - new Date(b.inicio))
+      .slice(0, 6);
+  }, [eventos]);
+
+// Citas próximas (solo "Pendiente" o "Activo")
   const citasProximas = useMemo(() => {
   const today0 = floorDate(new Date());
   const in7 = new Date(today0.getTime() + 7 * 86400000);
@@ -155,14 +213,13 @@ export default function Home({ setSeccion }) {
     const pend = (tareas || []).filter((t) => Number(t.completado) === 0);
     return pend
       .sort((a, b) => {
-        const ta = a.vencimiento ? new Date(a.vencimiento).getTime() : Infinity;
-        const tb = b.vencimiento ? new Date(b.vencimiento).getTime() : Infinity;
+        const ta = a.vencimiento ? (parseLocalYMD(a.vencimiento)?.getTime() ?? Infinity) : Infinity;
+        const tb = b.vencimiento ? (parseLocalYMD(b.vencimiento)?.getTime() ?? Infinity) : Infinity;
         return ta - tb;
       })
       .slice(0, 8);
   }, [tareas]);
-
-  const notasFijadas = useMemo(
+const notasFijadas = useMemo(
     () => (notas || []).filter((n) => Number(n.fijada) && !Number(n.archivada)).slice(0, 5),
     [notas]
   );
@@ -298,7 +355,7 @@ export default function Home({ setSeccion }) {
                         list.length
                           ? list
                               .slice(0, 5)
-                              .map((e) => `${e.titulo}${e.inicio ? " • " + fmtDateTime(e.inicio) : ""}`)
+                              .map((e) => `${esCumple(e) ? "🎂 " : ""}{e.titulo}${e.inicio ? " • " + fmtDateTime(e.inicio) : ""}`)
                               .join("\n")
                           : undefined
                       }
@@ -336,15 +393,12 @@ export default function Home({ setSeccion }) {
                 )}
 
                 {eventosProximos.map((e) => (
-                  <div key={`e-${e.id}`} className="p-2 rounded-xl bg-gray-50 dark:bg-gray-800/60">
+                  <div key={`e-${e.id}`} className={`p-2 rounded-xl bg-gray-50 dark:bg-gray-800/60 ${isActivoEvento(e) ? "animate-pulse ring-1 ring-blue-400/60 dark:ring-blue-300/50" : ""}`}>
                     <div className="flex items-center justify-between">
-                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{e.titulo}</div>
-                      <div className="text-[11px] text-gray-600 dark:text-gray-300">{fmtDateShort(e.inicio)}</div>
+                      <div className="flex items-center gap-2"><span className="inline-flex h-5 w-5 items-center justify-center rounded-md text-[10px] font-bold bg-blue-600 text-white">E</span><div className="text-sm font-medium text-gray-900 dark:text-gray-100">{e.titulo}</div></div>
+                      <div className="text-[11px] text-gray-600 dark:text-gray-300">{esCumple(e) ?   fmtDateShort(e.inicio)   : (e.todo_dia       ? `Fecha: ${fmtDateShort(e.inicio)} (Todo el día)`       : `${fmtDateShort(e.inicio)} ${(e.hora || fmtTime(e.inicio))}${e.fin ? `–${fmtTime(e.fin)}` : ""}`    )}</div>
                     </div>
-                    <div className="text-[11px] text-gray-600 dark:text-gray-300 mt-0.5">
-                      {(e.categoria || "").toLowerCase() === "cumpleaños" ? "🎂 Cumpleaños" : e.categoria || ""}
-                      {e.todo_dia ? " • Todo el día" : ""}
-                    </div>
+                    {!esCumple(e) && (<div className="text-[11px] text-gray-600 dark:text-gray-300 mt-0.5">{(e.categoria || "Evento")}{e.descripcion ? ` — ${e.descripcion.length > 60 ? e.descripcion.slice(0, 60) + "…" : e.descripcion}` : ""}</div>)}
                   </div>
                 ))}
 
@@ -356,12 +410,10 @@ export default function Home({ setSeccion }) {
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                        {c.titulo || c.asunto || "Cita"}
-                      </div>
-                      <div className="text-[11px] text-gray-600 dark:text-gray-300">{fmtDateShort(c._when)}</div>
+                      <div className="flex items-center gap-2"><span className="inline-flex h-5 w-5 items-center justify-center rounded-md text-[10px] font-bold bg-violet-600 text-white">C</span><div className="text-sm font-medium text-gray-900 dark:text-gray-100">Cita</div><span className="inline-flex items-center px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 text-[11px] font-medium text-gray-700 dark:text-gray-200">{nombreContacto(c, contactos)}</span></div>
+                      <div className="text-[11px] text-gray-600 dark:text-gray-300">{c.hora ? `${fmtDateShort(c._when)} ${c.hora}` : fmtDateShort(c._when)}</div>
                     </div>
-                    {c.lugar && <div className="text-[11px] text-gray-600 dark:text-gray-300">{c.lugar}</div>}
+                    <div className="text-[11px] text-gray-600 dark:text-gray-300 mt-0.5">{(c.tipo || "Cita")}{c.descripcion ? ` — ${c.descripcion.length > 60 ? c.descripcion.slice(0, 60) + "…" : c.descripcion}` : ""}</div>
                   </div>
                 ))}
               </div>
@@ -384,13 +436,12 @@ export default function Home({ setSeccion }) {
                   <div
                     key={t.id}
                     className={`p-2 rounded-xl ${
-                      isOverdue(t.vencimiento) ? "bg-rose-100 dark:bg-rose-900/30" : "bg-gray-50 dark:bg-gray-800/60"
+                      isOverdueLocal(t.vencimiento) ? "bg-rose-100 dark:bg-rose-900/30" : "bg-gray-50 dark:bg-gray-800/60"
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{t.titulo}</div>
-                      <div className="text-[11px] text-gray-600 dark:text-gray-300">
-                        {t.vencimiento ? fmtDateShort(t.vencimiento) : "—"}
+                      <div className="flex items-center gap-2"><span className="inline-flex h-5 w-5 items-center justify-center rounded-md text-[10px] font-bold bg-emerald-600 text-white">T</span><div className="text-sm font-medium text-gray-900 dark:text-gray-100">{t.titulo || "—"}</div></div><div className="text-[11px] text-gray-600 dark:text-gray-300">
+                        {labelLocalYMD(t.vencimiento)}
                       </div>
                     </div>
                     {t.descripcion && (
@@ -436,7 +487,7 @@ export default function Home({ setSeccion }) {
                       {c.foto_url ? (
                         <img
                           src={photoURL(c.foto_url)}
-                          alt={c.nombre || "Contacto"}
+                          alt={nombreContacto(c, contactos) || "Contacto"}
                           className="w-full h-full object-cover"
                           onError={(e) => {
                             e.currentTarget.onerror = null;
@@ -452,7 +503,7 @@ export default function Home({ setSeccion }) {
                         <div className="w-full h-full flex items-center justify-center text-xl">👤</div>
                       )}
                     </div>
-                    <div className="mt-1 text-xs text-gray-900 dark:text-gray-100 line-clamp-2">{c.nombre}</div>
+                    <div className="mt-1 text-xs text-gray-900 dark:text-gray-100 line-clamp-2">{nombreContacto(c, contactos)}</div>
                   </div>
                 ))}
               </div>

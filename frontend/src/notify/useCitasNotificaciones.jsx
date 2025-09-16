@@ -1,4 +1,3 @@
-// src/hooks/useCitasNotificaciones.jsx
 import React, { useEffect, useRef, useState } from "react";
 
 const API = "http://localhost:3000/api";

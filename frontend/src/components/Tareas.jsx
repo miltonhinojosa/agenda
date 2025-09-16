@@ -2,18 +2,27 @@
 import React, { useEffect, useMemo, useState } from "react";
 
 /* ================= Config ================= */
-const API = "http://localhost:3000/api";
+const API = import.meta.env.DEV ? "http://localhost:3000/api" : "/api";
 
 /* ===== helper ÚNICO añadido para sesión (cookies) ===== */
 const withCreds = (url, opts = {}) => fetch(url, { credentials: "include", ...opts });
 
-/* ================= Helpers ================= */
+/* ================= Helpers (fechas estilo Citas) ================= */
 const isEmpty = (v) => v == null || String(v).trim() === "";
-const fmtDate = (s) => {
-  if (!s) return "";
-  const d = new Date(s);
-  if (Number.isNaN(d.getTime())) return s;
-  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
+
+// Normaliza: 'YYYY-MM-DD' => día local (12:00), otros => new Date(str)
+const normDateFromValue = (v) => {
+  if (!v) return null;
+  const str = String(v);
+  const isYMD = str.length === 10 && str[4] === "-" && str[7] === "-";
+  const d = isYMD ? new Date(str + "T12:00:00") : new Date(str);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+// Formato de fecha igual que Citas
+const formatFecha = (v) => {
+  const d = normDateFromValue(v);
+  return d ? d.toLocaleDateString("es-BO", { day: "2-digit", month: "2-digit", year: "numeric" }) : "";
 };
 
 /* ================= Componente ================= */
@@ -44,7 +53,6 @@ const Tareas = () => {
     try {
       const r = await withCreds(`${API}/tareas`);
       const data = await r.json();
-      // Asegurar estructura mínima y normalizar booleanos
       const arr = Array.isArray(data) ? data : [];
       setTareas(
         arr.map((t) => ({
@@ -53,7 +61,7 @@ const Tareas = () => {
           descripcion: t.descripcion ?? "",
           vencimiento: t.vencimiento ?? "",
           completado: Number(t.completado) ? 1 : 0,
-          creado_en: t.creado_en, // por si tu backend lo trae (no se usa pero no molesta)
+          creado_en: t.creado_en ?? null,
         }))
       );
     } catch (e) {
@@ -70,35 +78,37 @@ const Tareas = () => {
 
   /* ============ Derivados (filtro/orden) ============ */
   const tareasFiltradas = useMemo(() => {
-  const t = busqueda.toLowerCase();
-  const due = (x) => (x.vencimiento ? new Date(x.vencimiento).getTime() : Infinity);
+    const t = busqueda.toLowerCase();
+    const due = (x) => {
+      const d = normDateFromValue(x.vencimiento);
+      return d ? d.getTime() : Infinity;
+    };
 
-  // Filtro por tab
-  const visible = tareas.filter((ta) =>
-    tab === "t" ? true : tab === "p" ? !Number(ta.completado) : Number(ta.completado) === 1
-  );
+    // Filtro por tab
+    const visible = tareas.filter((ta) =>
+      tab === "t" ? true : tab === "p" ? !Number(ta.completado) : Number(ta.completado) === 1
+    );
 
-  // Filtro de texto
-  const buscadas = visible.filter(
-    (ta) =>
-      (ta.titulo || "").toLowerCase().includes(t) ||
-      (ta.descripcion || "").toLowerCase().includes(t)
-  );
+    // Filtro de texto
+    const buscadas = visible.filter(
+      (ta) =>
+        (ta.titulo || "").toLowerCase().includes(t) ||
+        (ta.descripcion || "").toLowerCase().includes(t)
+    );
 
-  // Orden
-  return buscadas.sort((a, b) => {
-    const ga = Number(a.completado);
-    const gb = Number(b.completado);
-    if (tab === "p") return due(a) - due(b);        // pendientes: más próximo primero
-    if (tab === "c") return due(b) - due(a);        // completadas: más reciente primero
+    // Orden
+    return buscadas.sort((a, b) => {
+      const ga = Number(a.completado);
+      const gb = Number(b.completado);
+      if (tab === "p") return due(a) - due(b);        // pendientes: más próximo primero
+      if (tab === "c") return due(b) - due(a);        // completadas: más reciente primero
 
-    // Tab "t": primero pendientes, luego completadas
-    if (ga !== gb) return ga - gb;                  // 0 antes que 1
-    return ga === 0 ? due(a) - due(b)              // dentro de pendientes: asc
-                    : due(b) - due(a);             // dentro de completadas: desc
-  });
+      // Tab "t": primero pendientes, luego completadas
+      if (ga !== gb) return ga - gb;                  // 0 antes que 1
+      return ga === 0 ? due(a) - due(b)              // dentro de pendientes: asc
+                      : due(b) - due(a);             // dentro de completadas: desc
+    });
   }, [tareas, tab, busqueda]);
-
 
   /* ============ Acciones API ============ */
   const abrirNueva = () => {
@@ -135,45 +145,56 @@ const Tareas = () => {
       completado: Number(form.completado) ? 1 : 0,
     };
 
-    if (modoEdicion && tareaEditando) {
-      await withCreds(`${API}/tareas/${tareaEditando.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-    } else {
-      await withCreds(`${API}/tareas`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+    try {
+      if (modoEdicion && tareaEditando) {
+        await withCreds(`${API}/tareas/${tareaEditando.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+      } else {
+        await withCreds(`${API}/tareas`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+      }
+      setMostrarModal(false);
+      setModoEdicion(false);
+      setTareaEditando(null);
+      await cargarTareas();
+    } catch (e) {
+      console.error("Error guardando tarea:", e);
     }
-
-    setMostrarModal(false);
-    setModoEdicion(false);
-    setTareaEditando(null);
-    cargarTareas();
   };
 
   const eliminarTarea = async (id) => {
     if (!window.confirm("¿Eliminar esta tarea?")) return;
-    await withCreds(`${API}/tareas/${id}`, { method: "DELETE" });
-    cargarTareas();
+    try {
+      await withCreds(`${API}/tareas/${id}`, { method: "DELETE" });
+      await cargarTareas();
+    } catch (e) {
+      console.error("Error eliminando tarea:", e);
+    }
   };
 
   const toggleCompletado = async (t) => {
     const nuevo = Number(t.completado) ? 0 : 1;
-    await withCreds(`${API}/tareas/${t.id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        titulo: t.titulo,
-        descripcion: t.descripcion,
-        vencimiento: t.vencimiento || null,
-        completado: nuevo,
-      }),
-    });
-    cargarTareas();
+    try {
+      await withCreds(`${API}/tareas/${t.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          titulo: t.titulo,
+          descripcion: t.descripcion,
+          vencimiento: t.vencimiento || null,
+          completado: nuevo,
+        }),
+      });
+      await cargarTareas();
+    } catch (e) {
+      console.error("Error cambiando estado:", e);
+    }
   };
 
   /* ============ UI ============ */
@@ -233,8 +254,8 @@ const Tareas = () => {
         </div>
       </div>
 
-      {/* Grilla de tareas */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+      {/* Grilla de tareas (1/2/3/4 como Citas) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
         {/* Skeleton de carga */}
         {cargando &&
           [...Array(6)].map((_, i) => (
@@ -254,8 +275,9 @@ const Tareas = () => {
         {/* Tarjetas */}
         {!cargando &&
           tareasFiltradas.map((t) => {
+            const d = normDateFromValue(t.vencimiento);
             const vencida =
-              t.vencimiento && new Date(t.vencimiento).getTime() < Date.now() && !t.completado;
+              !!d && d.setHours(0, 0, 0, 0) < new Date().setHours(0, 0, 0, 0) && !t.completado;
 
             return (
               <div
@@ -277,7 +299,7 @@ const Tareas = () => {
                       {t.titulo}
                     </h3>
                     <p className="text-xs text-gray-700 dark:text-gray-300">
-                      {t.vencimiento ? `📅 ${fmtDate(t.vencimiento)}` : "— sin fecha —"}
+                      {t.vencimiento ? `📅 ${formatFecha(t.vencimiento)}` : "— sin fecha —"}
                       {vencida ? " • ⚠️ vencida" : ""}
                     </p>
                   </div>
